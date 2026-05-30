@@ -1,0 +1,19 @@
+Dentista: Bom dia! Pode sentar. Me confirma seu nome completo, por favor?
+Paciente: Bom dia, doutora. Meu nome é Maria das Dores Oliveira Santos.
+Dentista: E seu CPF e o número do Cartão SUS?
+Paciente: O CPF é 123.456.789-00 e o Cartão SUS é 700123456789012. Meu telefone é (11) 99876-5432, caso precisem.
+Dentista: Perfeito. Me conta, o que te traz aqui hoje?
+Paciente: Doutora, faz uns quatro dias que estou com uma dor forte num dente embaixo, do lado direito. Dói principalmente quando eu mastigo e quando tomo água gelada.
+Dentista: Essa dor acorda você à noite? É uma dor que late?
+Paciente: Olha, latejar não lateja muito, mas quando vem é uma fisgada bem forte. À noite não chega a me acordar.
+Dentista: Entendi. Você lembra de ter quebrado ou perdido alguma restauração nesse dente?
+Paciente: Acho que sim, tinha uma obturação antiga que caiu faz um tempo.
+Dentista: Vou dar uma olhada então. Abre bem a boca pra mim... Olha, aqui no primeiro molar inferior direito, o dente 46, tem uma cárie bem profunda na parte de cima, na face oclusal. A obturação antiga realmente saiu. O dente não está mole, sem mobilidade, e a gengiva ao redor está um pouco inflamada, vermelha.
+Paciente: E é grave, doutora?
+Dentista: A cárie está profunda, perto da polpa, mas dá pra tratar. Hoje eu vou remover toda a cárie e fazer uma restauração de resina composta nesse dente 46. Também notei um acúmulo de tártaro nos dentes da frente de baixo, então vou agendar uma limpeza, uma profilaxia, pra daqui a duas semanas.
+Paciente: Tá bom. E vai doer?
+Dentista: Vou aplicar anestesia local, então você não vai sentir dor durante o procedimento. Depois que passar a anestesia pode ficar um pouco sensível, é normal. Se doer, pode tomar um analgésico comum.
+Paciente: Combinado.
+Dentista: Mais uma coisa importante: você precisa caprichar na escovação, principalmente atrás, e usar fio dental todo dia. A inflamação na gengiva é por causa da placa acumulada. Vou te orientar a escovar três vezes ao dia com creme dental com flúor.
+Paciente: Pode deixar, doutora. Obrigada!
+Dentista: Por nada. Vou começar o procedimento então.
