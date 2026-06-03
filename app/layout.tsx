@@ -20,6 +20,11 @@ export const metadata: Metadata = {
   title: "Jasmin — Otimize suas consultas com inteligência artificial",
   description:
     "Jasmin transcreve e resume seus atendimentos em tempo real. Você foca no paciente, nossa IA cuida do prontuário.",
+  icons: {
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
+  },
 };
 
 export default function RootLayout({

@@ -1,3 +1,7 @@
+import { ComoFunciona } from "./components/ComoFunciona";
+import { Contato } from "./components/Contato";
+import { Footer } from "./components/Footer";
+
 export default function Home() {
   return (
     <>
@@ -8,11 +12,9 @@ export default function Home() {
             <img src="/logo.png" alt="Jasmin" />
           </a>
           <div className="nav-links">
-            <a href="#recursos">Recursos</a>
-            <a href="#sobre">Sobre</a>
-            <a href="/login">Entrar</a>
-            <a href="/consulta" className="btn btn-dark">
-              Acessar
+            <a href="#como-funciona">Como funciona</a>
+            <a href="#contato" className="btn btn-dark">
+              Entre em contato
             </a>
           </div>
         </nav>
@@ -23,7 +25,7 @@ export default function Home() {
           <div className="hero-copy">
             <span className="eyebrow">
               <span className="dot" />
-              Assistente odontológica com IA
+              Assistência Clínica com IA
             </span>
 
             <h1>
@@ -38,8 +40,8 @@ export default function Home() {
             </p>
 
             <div className="cta-row">
-              <a href="/consulta" className="btn btn-cta">
-                Começar agora{" "}
+              <a href="#contato" className="btn btn-cta">
+                Entre em contato{" "}
                 <span className="arrow" aria-hidden="true">
                   →
                 </span>
@@ -123,6 +125,10 @@ export default function Home() {
 
         </div>
       </div>
+
+      <ComoFunciona />
+      <Contato />
+      <Footer />
     </>
   );
 }

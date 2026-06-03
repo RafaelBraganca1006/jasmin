@@ -1,32 +1,43 @@
 import { groq, MODELS } from "@/lib/groq";
-import type { ProntuarioSOAP } from "@/lib/types";
+import type { ProntuarioSOAP, SOAPFieldKey } from "@/lib/types";
 
 const SYSTEM_PROMPT = `Você é um assistente de documentação clínica odontológica para o SUS (Brasil).
-Recebe a TRANSCRIÇÃO BRUTA de uma consulta (diálogo entre dentista e paciente) e produz um registro clínico estruturado.
+Recebe a TRANSCRIÇÃO BRUTA de uma consulta (diálogo entre dentista e paciente) e produz dois blocos de saída em um único JSON:
+1) O PRONTUÁRIO CLÍNICO completo nos campos SOAP.
+2) As EVIDÊNCIAS — citações literais da transcrição que embasam cada campo SOAP.
 
-REGRAS DE PRIVACIDADE (LGPD) — OBRIGATÓRIO:
-- NUNCA inclua dados que identifiquem o paciente: nome, CPF, CNS/Cartão SUS, RG, telefone, e-mail, endereço, data de nascimento ou nomes de familiares.
-- Se algum identificador aparecer na transcrição, substitua por [REMOVIDO] no texto e registre o TIPO em "alertasAnonimizacao" (ex.: "nome", "CPF") — sem repetir o valor.
-- Mantenha apenas informação clínica relevante.
+═══ BLOCO 1 — PRONTUÁRIO CLÍNICO (SOAP) ═══
 
-FORMATO CLÍNICO (padrão SOAP + odontologia):
-- subjetivo: queixa e história relatada pelo paciente, em linguagem clínica.
-- objetivo: achados do exame clínico (dentes, faces, lesões, mobilidade, etc.).
-- avaliacao: hipótese diagnóstica / avaliação clínica.
-- plano: conduta, procedimentos realizados ou planejados, prescrições e orientações.
-- queixaPrincipal: resumo em UMA frase.
-- dentesEnvolvidos: notação FDI (ex.: "46", "36"); array vazio se nenhum dente for citado.
-- procedimentos: lista de procedimentos mencionados.
-- orientacoes: orientações dadas ao paciente.
+Preencha OBRIGATORIAMENTE todos estes campos com linguagem clínica em português:
+- subjetivo: queixa e história relatada pelo paciente (ex.: "Paciente relata dor espontânea no dente 36 há 3 dias, com piora ao mastigar.").
+- objetivo: achados do exame clínico (dentes, faces, lesões, mobilidade, percussão, sondagem, etc.).
+- avaliacao: hipótese diagnóstica ou avaliação clínica (ex.: "Provável pulpite irreversível em dente 36.").
+- plano: conduta, procedimentos realizados ou planejados, prescrições e orientações (ex.: "Indicado tratamento endodôntico em dente 36.").
+- queixaPrincipal: resumo em UMA frase curta (ex.: "Dor em dente 36 há 3 dias.").
+- dentesEnvolvidos: array com notação FDI dos dentes citados (ex.: ["36"]); use [] se nenhum for mencionado.
+- procedimentos: array com os procedimentos mencionados (ex.: ["radiografia periapical", "endodontia"]); use [] se nenhum.
+- orientacoes: orientações dadas ao paciente (ex.: "Evitar mastigar do lado esquerdo até o procedimento."); use "" se nenhuma.
+- alertasAnonimizacao: array com TIPOS de dado pessoal removidos (ex.: ["nome"]); use [] se nenhum.
 
-ESTILO:
-- Português clínico, conciso, impessoal, em terceira pessoa.
-- NÃO invente informação que não esteja na transcrição. Se algo não foi dito, use "" (string vazia) ou [] (array vazio).
-- Use terminologia odontológica correta e notação FDI para dentes.
+REGRAS DE PRIVACIDADE (LGPD): NUNCA inclua nome, CPF, CNS, RG, telefone, e-mail, endereço ou data de nascimento. Substitua por [REMOVIDO] e registre o tipo em alertasAnonimizacao.
 
-SAÍDA:
-Responda SOMENTE com um objeto JSON válido (sem markdown, sem comentários) contendo EXATAMENTE estas chaves:
-subjetivo, objetivo, avaliacao, plano, queixaPrincipal, dentesEnvolvidos, procedimentos, orientacoes, alertasAnonimizacao.`;
+ESTILO: português clínico, conciso, impessoal, terceira pessoa. NÃO invente — use "" ou [] para o que não foi dito.
+
+═══ BLOCO 2 — EVIDÊNCIAS (campo adicional) ═══
+
+Após preencher todos os campos SOAP acima, adicione o campo "evidencias".
+"evidencias" é um objeto onde cada chave é o nome de um campo SOAP e o valor é um array de fragmentos COPIADOS LITERALMENTE da transcrição (palavra por palavra, sem parafrasear, 4-12 palavras cada) que embasam o conteúdo daquele campo.
+Use até 3 fragmentos por campo. Use [] se o campo não tiver trecho direto na transcrição.
+Exemplo: { "subjetivo": ["tô com uma dor no dente faz três dias", "piora quando mastigo"], "queixaPrincipal": ["dor no dente"] }
+
+═══ SAÍDA ═══
+Responda SOMENTE com JSON válido (sem markdown, sem comentários) com EXATAMENTE estas chaves:
+subjetivo, objetivo, avaliacao, plano, queixaPrincipal, dentesEnvolvidos, procedimentos, orientacoes, alertasAnonimizacao, evidencias.`;
+
+const SOAP_FIELD_KEYS: SOAPFieldKey[] = [
+  "subjetivo", "objetivo", "avaliacao", "plano",
+  "queixaPrincipal", "dentesEnvolvidos", "procedimentos", "orientacoes",
+];
 
 const EMPTY: ProntuarioSOAP = {
   subjetivo: "",
@@ -38,13 +49,24 @@ const EMPTY: ProntuarioSOAP = {
   procedimentos: [],
   orientacoes: "",
   alertasAnonimizacao: [],
+  evidencias: {},
 };
 
-/** Garante que todas as chaves existem e têm o tipo certo. */
 function normalize(raw: Partial<ProntuarioSOAP>): ProntuarioSOAP {
   const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   const arr = (v: unknown) =>
     Array.isArray(v) ? v.map((x) => String(x).trim()).filter(Boolean) : [];
+
+  const rawEv = raw.evidencias;
+  const evidencias: ProntuarioSOAP["evidencias"] = {};
+  if (rawEv && typeof rawEv === "object" && !Array.isArray(rawEv)) {
+    for (const key of SOAP_FIELD_KEYS) {
+      const v = (rawEv as Record<string, unknown>)[key];
+      if (Array.isArray(v) && v.length > 0) {
+        evidencias[key] = v.map(String).filter(Boolean);
+      }
+    }
+  }
 
   return {
     subjetivo: str(raw.subjetivo),
@@ -56,15 +78,11 @@ function normalize(raw: Partial<ProntuarioSOAP>): ProntuarioSOAP {
     procedimentos: arr(raw.procedimentos),
     orientacoes: str(raw.orientacoes),
     alertasAnonimizacao: arr(raw.alertasAnonimizacao),
+    evidencias,
   };
 }
 
-/**
- * Transforma a transcrição bruta em prontuário SOAP estruturado e anonimizado.
- */
-export async function structureTranscript(
-  transcript: string
-): Promise<ProntuarioSOAP> {
+export async function structureTranscript(transcript: string): Promise<ProntuarioSOAP> {
   const completion = await groq.chat.completions.create({
     model: MODELS.structuring,
     temperature: 0.2,
@@ -80,7 +98,6 @@ export async function structureTranscript(
   try {
     return normalize(JSON.parse(content));
   } catch {
-    // Se o modelo devolver algo não-JSON, não quebramos o fluxo.
     return { ...EMPTY };
   }
 }
