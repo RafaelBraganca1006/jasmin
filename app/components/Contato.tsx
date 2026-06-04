@@ -87,7 +87,7 @@ export function Contato() {
               </p>
             )}
 
-            <button type="submit" className="btn btn-cta ct-submit" disabled={status === "sending"}>
+            <button type="submit" className="btn btn-solid btn-lg ct-submit" disabled={status === "sending"}>
               {status === "sending" ? "Enviando…" : "Enviar"}
             </button>
           </form>

@@ -12,8 +12,7 @@ export default function Home() {
             <img src="/logo.png" alt="Jasmin" />
           </a>
           <div className="nav-links">
-            <a href="#como-funciona">Como funciona</a>
-            <a href="#contato" className="btn btn-dark">
+            <a href="#contato" className="btn btn-solid btn-md">
               Entre em contato
             </a>
           </div>
@@ -40,7 +39,7 @@ export default function Home() {
             </p>
 
             <div className="cta-row">
-              <a href="#contato" className="btn btn-cta">
+              <a href="#contato" className="btn btn-solid btn-xl">
                 Entre em contato{" "}
                 <span className="arrow" aria-hidden="true">
                   →
