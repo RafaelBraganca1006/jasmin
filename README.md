@@ -2,8 +2,6 @@
 
 **AI-native Platform for Brazilian Dentists.**
 
-**Voice in. Clean records out. Insurance claim ready.**
-
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white)
 ![Groq](https://img.shields.io/badge/AI-Groq-F55036?style=flat-square&logo=groq&logoColor=white)
