@@ -27,7 +27,7 @@ export function Footer() {
 
       <div className="wrap ft-bottom">
         <span>© {year} Jasmin. Todos os direitos reservados.</span>
-        <span className="ft-lgpd">Conformidade LGPD</span>
+        <span className="ft-lgpd"></span>
       </div>
     </footer>
   );

@@ -4,7 +4,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@radix-ui/react-tabs";
 import { Clock, HeartPulse, ShieldCheck } from "lucide-react";
 
 interface StepContent {
-  badge: string;
+  badge?: string;
   title: React.ReactNode;
   description: string;
 }
@@ -64,7 +64,6 @@ const STEPS: Step[] = [
     image: "/aba-dados.png",
     imageAlt: "Pessoa tranquila, simbolizando privacidade e confiança",
     content: {
-      badge: "Conformidade LGPD",
       title: (
         <>
           Privacidade
@@ -73,7 +72,7 @@ const STEPS: Step[] = [
         </>
       ),
       description:
-        "Dados que identificam o paciente são removidos automaticamente. Nada é registrado sem a sua revisão — a decisão final é sempre sua.",
+        "Dados que identificam o paciente são removidos automaticamente antes do processamento por IA. Prontuários ficam armazenados localmente no seu navegador. Nada é aprovado sem a sua revisão.",
     },
   },
 ];
@@ -105,7 +104,7 @@ export function ComoFunciona() {
             {STEPS.map((step) => (
               <TabsContent key={step.value} value={step.value} className="hf-content">
                 <div className="hf-text">
-                  <span className="hf-badge">{step.content.badge}</span>
+                  {step.content.badge && <span className="hf-badge">{step.content.badge}</span>}
                   <h3 className="hf-title">{step.content.title}</h3>
                   <p className="hf-paragraph">{step.content.description}</p>
                 </div>

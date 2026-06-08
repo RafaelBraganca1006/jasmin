@@ -8,7 +8,6 @@
 ![Groq](https://img.shields.io/badge/AI-Groq-F55036?style=flat-square&logo=groq&logoColor=white)
 ![LangGraph](https://img.shields.io/badge/Agents-LangGraph-1C3C3C?style=flat-square)
 ![Vercel](https://img.shields.io/badge/Deploy-Vercel-000000?style=flat-square&logo=vercel&logoColor=white)
-![LGPD](https://img.shields.io/badge/LGPD-Compliant-2E7D32?style=flat-square)
 
 <!-- SCREENSHOT: main /consulta screen — agenda view with the Jasmin Assistant panel open -->
 
@@ -47,7 +46,7 @@ Jasmin is organized in five layers, each with a single responsibility and a clea
 1. **Capture** — microphone → chunked audio → live Whisper transcription
 2. **Structuring** — the 5-step sequential agent turns raw transcript into a validated `ProntuarioModel`
 3. **Review** — Linked Evidence, the Step-5 gap reviewer, and the dentist's approval/signature
-4. **Persistence** — `localStorage`, JSON + Markdown, LGPD-first (no database, ever)
+4. **Persistence** — `localStorage`, JSON + Markdown, privacy-first (no external database; AI calls are ephemeral)
 5. **Interaction & Billing** — the Jasmin Assistant (conversational layer) and the upcoming billing agent, both consuming the persisted record
 
 ### Platform Overview
@@ -119,9 +118,9 @@ The next layer closes the loop the rest of the market leaves open. The plan: **R
 *Problem:* Unimed requires prior authorization for root canals. Amil rejects claims for wrong codes. Bradesco demands before-and-after X-rays. No dentist memorizes all of this.
 *Solution:* A per-*convênio* knowledge base in ChromaDB (planned) — the billing agent fetches the specific insurer's rules and applies them before the claim is generated, instead of relying on the dentist's memory.
 
-**Challenge 3: Patient Data Cannot Leave the Browser**
-*Problem:* LGPD compliance for clinical records is non-negotiable — no database, no cloud storage of patient data, full stop.
-*Solution:* A `localStorage`-first architecture (`lib/prontuario-storage.ts`). When AI agents need clinic data, they receive a **privacy-filtered snapshot** in the POST body (`lib/chat-snapshot.ts`) — processed ephemerally on the server and never persisted there.
+**Challenge 3: Clinical Records Stay Local; AI Processing Is Ephemeral**
+*Problem:* Clinical records must never be stored in an external database — the dentist owns the data. But audio transcriptions and clinical text are processed by Groq's API (servers located outside Brazil), so there is an important distinction between what is protected *at rest* and what travels for processing.
+*Solution:* A `localStorage`-first architecture (`lib/prontuario-storage.ts`) — clinical records stay in the dentist's browser and are never written to an external database. When AI agents need clinic data, they receive a **privacy-filtered snapshot** in the POST body (`lib/chat-snapshot.ts`) — processed ephemerally by the API and never persisted server-side.
 
 **Challenge 4: LLM Hallucination in a Clinical Context**
 *Problem:* A hallucinated CID-10 code or TUSS code isn't a cosmetic bug — it's a real *glosa*, a real financial loss.
@@ -143,7 +142,7 @@ Jasmin was designed in close collaboration with a practicing dentist from São P
 |---|---|
 | *"I never remember which TUSS code to use for each procedure — I just want to describe what I did."* | Natural language → TUSS mapping via RAG (planned for the billing agent). The dentist describes, the system codes. |
 | *"I get glosas every month for the same reasons — missing X-ray, wrong CID, forgot authorization. It's always the same mistakes."* | The Step-5 gap reviewer (`SYS_ALERTAS` in `lib/prontuario-agent.ts`) explicitly checks for missing fields, clinical risks, and inconsistencies before the record is approved — catching the recurring causes of *glosa* before the claim is even generated. |
-| *"I can't use a system that sends my patients' data to some server I don't control."* | A `localStorage`-first architecture. Clinical data never leaves the browser as a record — only ephemeral, privacy-filtered snapshots reach the AI for processing. LGPD by design, not by policy. |
+| *"I can't use a system that sends my patients' data to some server I don't control."* | A `localStorage`-first architecture. Clinical records never leave the browser at rest — AI processing uses ephemeral, privacy-filtered snapshots that are not persisted server-side. |
 | *"Sometimes I need to check what I said about a patient three months ago. I have to dig through paper notes."* | The Jasmin Assistant — ask in natural language, get answers sourced from past records, always with the consultation date cited as the source. |
 | *"The record needs to follow CFO rules exactly, or it has no legal value."* | The *prontuário* agent's five steps map onto the mandatory fields of *Resolução CFO 174/92* — *anamnese*, exam, diagnosis, treatment plan, evolution. Missing fields are flagged by the gap reviewer, never silently skipped. |
 
@@ -159,7 +158,7 @@ Jasmin was designed in close collaboration with a practicing dentist from São P
 | Transcription | Groq `whisper-large-v3` | Fast, accurate PT-BR speech-to-text, generous free tier |
 | Clinical Agent | Groq `llama-3.3-70b-versatile` (JSON mode) | Quality-to-cost balance for a 5-call sequential chain |
 | Chat Agent | LangGraph + Groq `llama-3.3-70b-versatile` | Stateful, tool-calling conversation loop with streaming |
-| Persistence | Browser `localStorage` | LGPD by design — no clinical database, ever |
+| Persistence | Browser `localStorage` | Records stay in the browser; AI calls are ephemeral and never stored server-side |
 | Styling | Global CSS (`app/globals.css`) — no Tailwind | Zero dependency, full control over the design system |
 | Auth | Single-password gate, SHA-256 session cookie | Simple enough for a single-clinic deployment, enforced at the edge |
 | Deploy | Vercel | Zero-config, serverless functions for the AI routes |
@@ -231,6 +230,43 @@ jasmin/
 
 ---
 
+## 🔒 Privacy & Data
+
+Jasmin takes a thoughtful approach to patient data, with important distinctions between what is protected today and what is required for full compliance in production.
+
+### What the MVP protects
+
+Clinical records (*prontuários*) are stored exclusively in the browser via `localStorage`. No patient data is persisted to any external database or server. The dentist owns the data and it never leaves their device at rest.
+
+### Current limitations
+
+Audio transcriptions and clinical text are processed ephemerally via Groq's API (servers located outside Brazil). Under Brazil's LGPD, health data is classified as sensitive personal data — the highest protection category. Sending this data to external processors without explicit patient consent and a signed Data Processing Agreement (DPA) is not fully compliant with LGPD requirements.
+
+This is an intentional MVP tradeoff, not an oversight. The architecture was designed so that the storage layer is already compliant — only the processing layer needs to be addressed for production.
+
+### Production roadmap for full compliance
+
+- Patient consent flow on first session (explicit opt-in for AI-assisted transcription)
+- Data Processing Agreement with the LLM provider (Anthropic and OpenAI both offer DPAs; Groq's DPA coverage for LGPD is less established)
+- Pre-send anonymization: replace patient identifiers (name, CPF, date of birth) with tokens before sending to the LLM API — the `alertasAnonimizacao` field in the schema already anticipates this
+- Evaluate on-device model inference (Ollama) for highest-sensitivity deployments where no data can leave the machine
+
+### For the current MVP
+
+Jasmin is designed for development and testing with synthetic or consented data. Do not use with real patient data in production without implementing the compliance steps above.
+
+---
+
+## ⚠️ Known Limitations
+
+**LGPD / Data Privacy:** Audio and text are processed via external LLM APIs. Full LGPD compliance for production requires patient consent, a DPA with the AI provider, and pre-send anonymization. See the [Privacy & Data](#-privacy--data) section above.
+
+**LLM Provider:** Currently using Groq (Llama 3.3 70B) on the free tier for development. For production clinical use, Claude Sonnet or GPT-4o are recommended for higher accuracy in clinical reasoning and structured output. Groq Whisper is retained for transcription (best latency available).
+
+**`localStorage` only:** Patient data does not persist across devices or browsers. A production deployment would require a compliant database with encryption at rest.
+
+---
+
 ## 🚀 Getting Started
 
 ### Prerequisites
@@ -261,7 +297,7 @@ npm run dev
 # → http://localhost:3000
 ```
 
-> **No database required.** All patient and clinical data is stored locally in the browser via `localStorage` — by design, for LGPD compliance. AI calls are the only data that briefly leaves the device, and they are never persisted server-side.
+> **No database required.** Clinical records are stored locally in the browser via `localStorage`. AI calls (transcription, structuring, and chat) are processed ephemerally by the Groq API and are never persisted server-side.
 
 ### Pipeline smoke tests
 
