@@ -1,6 +1,6 @@
 # 🌸 Jasmin
 
-**The first dental ERP where the dentist never types.**
+**The first AI-native Software for Brazilian Dentists**
 **Voice in. Clean records out. Insurance claim ready.**
 
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js&logoColor=white)
@@ -31,12 +31,12 @@ That system is Jasmin.
 ## ⚙️ How It Works
 
 1. **Dentist records the consultation** via microphone — or pastes/uploads an existing transcript directly.
-2. **Groq Whisper transcribes the audio** in 60-second batches as the consultation happens — the live transcript builds up on screen, chunk by chunk.
+2. **Groq Whisper transcribes the audio** in 60-second batches as the consultation happens — the live transcript builds up on screen, chunk by chunk (allowing for longer consultations).
 3. **A 5-step sequential agent structures the clinical record** the moment recording stops: *anamnese* → clinical exam & *odontograma* → CID-10 diagnosis → treatment plan → gap review.
-4. **The dentist reviews the pre-filled record** — edits any field inline, checks *Linked Evidence* to verify each finding against the original transcript, and approves it with a digital signature.
-5. **The record persists** as both JSON (`ProntuarioModel`, consumed by AI agents and the UI) and Markdown (a deterministic render, ready for the billing agent) — keyed to the specific appointment, entirely in the browser.
+4. **The dentist reviews the pre-filled record** — edits any field inline if needed, can check *Linked Evidence* to verify each finding against the original transcript, and approves it with a digital signature.
+5. **The record persists** as both JSON (`ProntuarioModel`, for the UI) and Markdown (a deterministic render, consumed by AI agents) — keyed to the specific appointment, entirely in the browser.
 6. **Jasmin Assistant answers questions about the patient**, the agenda, or any saved record — using real data and citing its sources.
-7. **[Coming next] A billing agent reads the `.md` record**, maps the procedures to TUSS codes, checks the patient's insurance rules, and generates the TISS claim form — ready to submit.
+7. **A billing agent reads the `.md` record**, maps the procedures to TUSS codes, checks the patient's insurance rules, and generates the TISS claim form — ready to submit.
 
 ---
 
@@ -103,7 +103,7 @@ A stateful conversational agent built with **LangGraph** (`lib/jasmin-graph.ts`)
 - **Storage snapshot, not a database.** `lib/chat-snapshot.ts` builds a privacy-filtered slice of `localStorage` server-side: patients are reduced to `{ id, nome, sobrenome, convenio, status }` — never CPF, phone, e-mail, or address — and clinical records pass through already anonymized by the *prontuário* agent. The system prompt enforces a hard rule: every name, diagnosis, tooth, procedure, or appointment must come from a real tool result or a selected chip — **never a "plausible-sounding" guess**.
 - **Streaming with a tool trace.** `/api/chat` streams raw text interleaved with inline markers (`[[TOOL_START:name]]`, `[[TOOL_RESULT:name|summary]]`, `[[RESET]]`) that `useChatStream.ts` parses into a live trace of what the assistant is doing. If the model fails to call a function or returns an empty final turn, the route silently falls back to a tool-less completion that **reuses the tool outputs already fetched** — the dentist always gets an answer, never a blank screen.
 
-### Billing Agent (Coming Next)
+### Billing Agent
 
 The next layer closes the loop the rest of the market leaves open. The plan: **RAG over ~393 dental TUSS procedures**, filtered from the public ANS dataset (March 2024 release), indexed in a local **ChromaDB**. Retrieval is hybrid — semantic search surfaces the top-3 candidate codes, and a deterministic lookup table validates the exact match (the same "never guess" philosophy as the CID-10 step). On top of that, a **6-node LangGraph**: `Parser → TUSS Mapper → CID Validator → Rules Checker → Guia Builder → Output`. The *Cobranças* tab (`app/consulta/components/Cobrancas.tsx`) already lists every consultation that has a saved *prontuário* and is waiting on a claim — it's the placeholder this pipeline will plug straight into.
 
@@ -143,7 +143,6 @@ Jasmin was designed in close collaboration with a practicing dentist from São P
 |---|---|
 | *"I never remember which TUSS code to use for each procedure — I just want to describe what I did."* | Natural language → TUSS mapping via RAG (planned for the billing agent). The dentist describes, the system codes. |
 | *"I get glosas every month for the same reasons — missing X-ray, wrong CID, forgot authorization. It's always the same mistakes."* | The Step-5 gap reviewer (`SYS_ALERTAS` in `lib/prontuario-agent.ts`) explicitly checks for missing fields, clinical risks, and inconsistencies before the record is approved — catching the recurring causes of *glosa* before the claim is even generated. |
-| *"I can't use a system that sends my patients' data to some server I don't control."* | A `localStorage`-first architecture. Clinical data never leaves the browser as a record — only ephemeral, privacy-filtered snapshots reach the AI for processing. LGPD by design, not by policy. |
 | *"Sometimes I need to check what I said about a patient three months ago. I have to dig through paper notes."* | The Jasmin Assistant — ask in natural language, get answers sourced from past records, always with the consultation date cited as the source. |
 | *"The record needs to follow CFO rules exactly, or it has no legal value."* | The *prontuário* agent's five steps map onto the mandatory fields of *Resolução CFO 174/92* — *anamnese*, exam, diagnosis, treatment plan, evolution. Missing fields are flagged by the gap reviewer, never silently skipped. |
 
