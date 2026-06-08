@@ -1,7 +1,6 @@
 # 🌸 Jasmin
 
-**The first dental ERP where the dentist never types.**
-**Voice in. Clean records out. Insurance claim ready.**
+**AI-native Platform for Brazilian Dentists.**
 
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178C6?style=flat-square&logo=typescript&logoColor=white)
@@ -15,11 +14,11 @@
 
 ## 🦷 The Problem
 
-A dentist in a Brazilian municipal clinic (*SUS*, the public health system) sees patient after patient, and after every single one, the same ritual repeats: open the desktop system, click through half a dozen screens, type up the *anamnese* (the clinical interview — complaints, history, allergies), describe the exam, pick a diagnostic code, write the treatment plan, fill the *odontograma* (the tooth-by-tooth chart). Studies on dental practice management put this at **up to 40% of the working day** spent clicking and typing instead of treating patients.
+A dentist sees patient after patient, and after every single one, the same ritual repeats: open the desktop system, click through half a dozen screens, type up the *anamnese* (the clinical interview — complaints, history, allergies), describe the exam, pick a diagnostic code, write the treatment plan, fill the *odontograma* (the tooth-by-tooth chart). Studies on dental practice management put this at **up to 40% of the working day** spent clicking and typing instead of treating patients.
 
-It gets worse at the end of the month. Clinics that work with *convênios* (private health insurance plans) submit *guias* (claim forms) for reimbursement — and a meaningful share comes back denied. *Glosas* (claim denials / payment rejections issued by the insurer) are estimated to cost clinics **10–17% of monthly revenue**. The reason is almost always mechanical: the wrong TUSS procedure code, a CID-10 diagnosis that doesn't match the procedure, a missing X-ray, no prior authorization on file. None of this is a knowledge problem — every dentist knows what an X-ray confirmation is for. It's a documentation problem that compounds, silently, until the bill doesn't get paid.
+It gets worse at the end of the month. Clinics that work with *convênios* (private health insurance plans) submit *guias* (claim forms) for reimbursement and a meaningful share comes back denied. *Glosas* (claim denials / payment rejections issued by the insurer) are estimated to cost clinics **10–17% of monthly revenue**. The reason is almost always mechanical: the wrong TUSS procedure code, a CID-10 diagnosis that doesn't match the procedure, a missing X-ray, no prior authorization on file. None of this is a knowledge problem. Every dentist knows what an X-ray confirmation is for. It's a documentation problem that compounds, silently, until the bill doesn't get paid.
 
-Existing systems don't close this loop. *Clinicorp*, *Dental Office* and similar platforms digitize the form — they don't remove the burden of filling it in, and they stop well before the billing step where the money is actually won or lost.
+Existing systems don't close this loop. *Clinicorp*, *Dental Office* and similar platforms digitize the form, they don't remove the burden of filling it in, and they stop well before the billing step where the money is actually won or lost.
 
 > *"The dentist already speaks the findings out loud. The bottleneck is not knowledge — it's the absence of a system that listens, understands clinical Portuguese, and translates speech into compliant records and billing documents."*
 
@@ -30,12 +29,12 @@ That system is Jasmin.
 ## ⚙️ How It Works
 
 1. **Dentist records the consultation** via microphone — or pastes/uploads an existing transcript directly.
-2. **Groq Whisper transcribes the audio** in 60-second batches as the consultation happens — the live transcript builds up on screen, chunk by chunk.
+2. **Groq Whisper transcribes the audio** in 60-second batches as the consultation happens — the live transcript builds up on screen, chunk by chunk (allowing for longer consultations).
 3. **A 5-step sequential agent structures the clinical record** the moment recording stops: *anamnese* → clinical exam & *odontograma* → CID-10 diagnosis → treatment plan → gap review.
-4. **The dentist reviews the pre-filled record** — edits any field inline, checks *Linked Evidence* to verify each finding against the original transcript, and approves it with a digital signature.
-5. **The record persists** as both JSON (`ProntuarioModel`, consumed by AI agents and the UI) and Markdown (a deterministic render, ready for the billing agent) — keyed to the specific appointment, entirely in the browser.
+4. **The dentist reviews the pre-filled record** — edits any field inline if needed, can check *Linked Evidence* to verify each finding against the original transcript, and approves it with a digital signature.
+5. **The record persists** as both JSON (`ProntuarioModel`, for the UI) and Markdown (a deterministic render, consumed by AI agents) — keyed to the specific appointment, entirely in the browser.
 6. **Jasmin Assistant answers questions about the patient**, the agenda, or any saved record — using real data and citing its sources.
-7. **[Coming next] A billing agent reads the `.md` record**, maps the procedures to TUSS codes, checks the patient's insurance rules, and generates the TISS claim form — ready to submit.
+7. **A billing agent reads the `.md` record**, maps the procedures to TUSS codes, checks the patient's insurance rules, and generates the TISS claim form — ready to submit.
 
 ---
 
@@ -81,7 +80,7 @@ Audio is captured with `MediaRecorder` and flushed in **60-second batches** (`li
 
 The heart of Jasmin is `lib/prontuario-agent.ts` — five sequential calls to **Groq `llama-3.3-70b-versatile`** in JSON mode, each with a specialized system prompt, each step's output feeding the next:
 
-- **Step 1 — Anamnese extraction.** Input: raw transcript (+ patient record, if known). Output: `queixa_principal`, `historico_medico`, `medicamentos[]`, `alergias[]`, `habitos`, `comorbidades` — with an explicit LGPD instruction to replace any name, CPF, phone or address with `[REMOVIDO]` before it ever reaches the model's output.
+- **Step 1 — Anamnese extraction.** Input: raw transcript (+ patient record, if known). Output: `queixa_principal`, `historico_medico`, `medicamentos[]`, `alergias[]`, `habitos`, `comorbidades` — with an explicit instruction to replace any name, CPF, phone or address with `[REMOVIDO]` before it ever reaches the model's output.
 - **Step 2 — Clinical exam + odontograma.** Input: transcript + radiology report (if any). Output: extraoral/intraoral/periodontal/occlusal findings plus an `odontograma` array of `{ elemento, status, observacao }` — tooth numbers always in **FDI notation** (e.g. `46`, `11`).
 - **Step 3 — CID-10 mapping.** Input: the structured exam + radiology report. The system prompt embeds a **17-code lookup table for the K00–K14 dental range directly in the prompt** — small enough to fit, so no RAG is needed here. The model picks one principal diagnosis; a regex whitelist (`/^K(0\d|1[0-4])\.\d$/`) then strips out anything the model invents outside that range before it ever reaches the record.
 - **Step 4 — Treatment plan + evolution.** Input: transcript + structured exam + diagnosis. Output: `procedimentos[]`, `materiais`, `anestesia`, `pos_operatorio`, `proxima_consulta`. The prompt explicitly instructs the model to **translate colloquial dictation into clinical register** — *"vou remover a cárie e fazer uma obturação"* becomes *"Remoção de tecido cariado e restauração direta"* — with concrete before/after examples baked into the system prompt.
@@ -102,7 +101,7 @@ A stateful conversational agent built with **LangGraph** (`lib/jasmin-graph.ts`)
 - **Storage snapshot, not a database.** `lib/chat-snapshot.ts` builds a privacy-filtered slice of `localStorage` server-side: patients are reduced to `{ id, nome, sobrenome, convenio, status }` — never CPF, phone, e-mail, or address — and clinical records pass through already anonymized by the *prontuário* agent. The system prompt enforces a hard rule: every name, diagnosis, tooth, procedure, or appointment must come from a real tool result or a selected chip — **never a "plausible-sounding" guess**.
 - **Streaming with a tool trace.** `/api/chat` streams raw text interleaved with inline markers (`[[TOOL_START:name]]`, `[[TOOL_RESULT:name|summary]]`, `[[RESET]]`) that `useChatStream.ts` parses into a live trace of what the assistant is doing. If the model fails to call a function or returns an empty final turn, the route silently falls back to a tool-less completion that **reuses the tool outputs already fetched** — the dentist always gets an answer, never a blank screen.
 
-### Billing Agent (Coming Next)
+### Billing Agent
 
 The next layer closes the loop the rest of the market leaves open. The plan: **RAG over ~393 dental TUSS procedures**, filtered from the public ANS dataset (March 2024 release), indexed in a local **ChromaDB**. Retrieval is hybrid — semantic search surfaces the top-3 candidate codes, and a deterministic lookup table validates the exact match (the same "never guess" philosophy as the CID-10 step). On top of that, a **6-node LangGraph**: `Parser → TUSS Mapper → CID Validator → Rules Checker → Guia Builder → Output`. The *Cobranças* tab (`app/consulta/components/Cobrancas.tsx`) already lists every consultation that has a saved *prontuário* and is waiting on a claim — it's the placeholder this pipeline will plug straight into.
 
