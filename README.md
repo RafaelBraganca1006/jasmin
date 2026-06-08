@@ -16,7 +16,7 @@
 
 ## 🦷 The Problem
 
-A dentist in a Brazilian municipal clinic (*SUS*, the public health system) sees patient after patient, and after every single one, the same ritual repeats: open the desktop system, click through half a dozen screens, type up the *anamnese* (the clinical interview — complaints, history, allergies), describe the exam, pick a diagnostic code, write the treatment plan, fill the *odontograma* (the tooth-by-tooth chart). Studies on dental practice management put this at **up to 40% of the working day** spent clicking and typing instead of treating patients.
+A dentist sees patient after patient, and after every single one, the same ritual repeats: open the desktop system, click through half a dozen screens, type up the *anamnese* (the clinical interview — complaints, history, allergies), describe the exam, pick a diagnostic code, write the treatment plan, fill the *odontograma* (the tooth-by-tooth chart). Studies on dental practice management put this at **up to 40% of the working day** spent clicking and typing instead of treating patients.
 
 It gets worse at the end of the month. Clinics that work with *convênios* (private health insurance plans) submit *guias* (claim forms) for reimbursement — and a meaningful share comes back denied. *Glosas* (claim denials / payment rejections issued by the insurer) are estimated to cost clinics **10–17% of monthly revenue**. The reason is almost always mechanical: the wrong TUSS procedure code, a CID-10 diagnosis that doesn't match the procedure, a missing X-ray, no prior authorization on file. None of this is a knowledge problem — every dentist knows what an X-ray confirmation is for. It's a documentation problem that compounds, silently, until the bill doesn't get paid.
 
