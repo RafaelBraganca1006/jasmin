@@ -1,6 +1,7 @@
 # 🌸 Jasmin
 
-**The first AI-native Software for Brazilian Dentists**
+**The first AI-native Software for Brazilian Dentists.**
+
 **Voice in. Clean records out. Insurance claim ready.**
 
 ![Next.js 15](https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=next.js&logoColor=white)
