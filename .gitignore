@@ -26,3 +26,8 @@ next-env.d.ts
 .env
 
 .vercel
+.gstack/
+
+# RAG (billing agent) — local vector store + python cache
+/.chromadb/
+scripts/__pycache__/

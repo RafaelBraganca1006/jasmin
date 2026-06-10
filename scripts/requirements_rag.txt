@@ -1,0 +1,9 @@
+# RAG do agente de cobrança — tudo gratuito e local (sem API key).
+# Instalado por scripts/start_rag.sh / start_rag.ps1.
+fastapi
+uvicorn
+chromadb
+sentence-transformers
+pymupdf
+pandas
+openpyxl

@@ -1,7 +1,10 @@
 "use client";
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@radix-ui/react-tabs";
-import { Clock, HeartPulse, ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { Tabs, TabsList, TabsTrigger } from "@radix-ui/react-tabs";
+import { motion, AnimatePresence } from "framer-motion";
+import { Clock, HeartPulse, Receipt } from "lucide-react";
+import { FadeUp } from "./Animate";
 
 interface StepContent {
   badge?: string;
@@ -17,6 +20,8 @@ interface Step {
   imageAlt: string;
   content: StepContent;
 }
+
+const ease = [0.25, 0.1, 0.25, 1] as const;
 
 const STEPS: Step[] = [
   {
@@ -58,64 +63,89 @@ const STEPS: Step[] = [
     },
   },
   {
-    value: "privacidade",
-    icon: <ShieldCheck className="hf-tab-icon" />,
-    label: "Dados protegidos",
+    value: "convenios",
+    icon: <Receipt className="hf-tab-icon" />,
+    label: "Sem glosas",
     image: "/aba-dados.png",
-    imageAlt: "Pessoa tranquila, simbolizando privacidade e confiança",
+    imageAlt: "Guia de convênio gerada automaticamente",
     content: {
+      badge: "Cobrança automática",
       title: (
         <>
-          Privacidade
+          Guia certa
           <br />
-          desde a origem.
+          da primeira vez.
         </>
       ),
       description:
-        "Dados que identificam o paciente são removidos automaticamente antes do processamento por IA. Prontuários ficam armazenados localmente no seu navegador. Nada é aprovado sem a sua revisão.",
+        "Jasmin lê o prontuário, mapeia os códigos TUSS corretos e verifica as regras do convênio do paciente antes de gerar a guia TISS.",
     },
   },
 ];
 
 export function ComoFunciona() {
+  const [active, setActive] = useState(STEPS[0].value);
+  const currentStep = STEPS.find((s) => s.value === active)!;
+
   return (
     <section className="hf" id="como-funciona">
       <div className="wrap">
-        <div className="hf-head">
-          <h2 className="hf-heading">
-            Nós transformamos consultas
-            <br />
-            em documentação clínica.
-          </h2>
-          <p className="hf-desc">Menos burocracia, mais cuidado.</p>
-        </div>
-
-        <Tabs defaultValue={STEPS[0].value} className="hf-tabs">
-          <TabsList className="hf-tablist">
-            {STEPS.map((step) => (
-              <TabsTrigger key={step.value} value={step.value} className="hf-trigger">
-                {step.icon}
-                {step.label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-
-          <div className="hf-panel">
-            {STEPS.map((step) => (
-              <TabsContent key={step.value} value={step.value} className="hf-content">
-                <div className="hf-text">
-                  {step.content.badge && <span className="hf-badge">{step.content.badge}</span>}
-                  <h3 className="hf-title">{step.content.title}</h3>
-                  <p className="hf-paragraph">{step.content.description}</p>
-                </div>
-                <div className="hf-media">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={step.image} alt={step.imageAlt} className="hf-image" />
-                </div>
-              </TabsContent>
-            ))}
+        <FadeUp>
+          <div className="hf-head">
+            <h2 className="hf-heading">
+              Nós transformamos consultas
+              <br />
+              em documentação clínica.
+            </h2>
+            <p className="hf-desc">Menos burocracia, mais cuidado.</p>
           </div>
-        </Tabs>
+        </FadeUp>
+
+        <FadeUp delay={0.1}>
+          <Tabs value={active} onValueChange={setActive} className="hf-tabs">
+            <TabsList className="hf-tablist">
+              {STEPS.map((step) => (
+                <TabsTrigger
+                  key={step.value}
+                  value={step.value}
+                  className="hf-trigger"
+                >
+                  {step.icon}
+                  {step.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            <div className="hf-panel">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={active}
+                  className="hf-content"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.28, ease }}
+                >
+                  <div className="hf-text">
+                    {currentStep.content.badge && (
+                      <span className="hf-badge">{currentStep.content.badge}</span>
+                    )}
+                    <h3 className="hf-title">{currentStep.content.title}</h3>
+                    <p className="hf-paragraph">{currentStep.content.description}</p>
+                  </div>
+                  <div className="hf-media">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={currentStep.image}
+                      alt={currentStep.imageAlt}
+                      className="hf-image"
+                    />
+                  </div>
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </Tabs>
+        </FadeUp>
       </div>
     </section>
   );

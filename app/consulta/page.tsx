@@ -1,104 +1,36 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ProntuarioSOAP, SOAPFieldKey } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ProntuarioView from "@/app/components/ProntuarioView";
+import FichaClinica from "@/app/consulta/components/FichaClinica";
+import Cobrancas from "@/app/consulta/components/Cobrancas";
+import Financeiro from "@/app/consulta/components/Financeiro";
+import Odontograma from "@/app/consulta/components/Odontograma";
+import ConsultasView from "@/app/consulta/components/ConsultasView";
+import DocumentosView from "@/app/consulta/components/DocumentosView";
+import type { ProntuarioModel } from "@/lib/types-prontuario";
+import { getProntuario, saveProntuario, getHistoricoMd, saveTranscript, getTranscript, hasProntuario, getPatientSummaries, deleteProntuario, deleteOdontograma } from "@/lib/prontuario-storage";
+import { deleteCobranca } from "@/lib/cobranca-storage";
+import type { PatientSummary } from "@/lib/types-prontuario";
+import type { PatientData, AgAppointment } from "@/lib/types-jasmin";
 
 type Status = "idle" | "recording" | "transcribing" | "processing" | "done" | "error";
-
-type PatientData = {
-  id: string;
-  nome: string;
-  sobrenome: string;
-  nomePreferido: string;
-  dataNascimento: string;
-  genero: string;
-  pronomes: string;
-  cpf: string;
-  status: "ativo" | "inativo";
-  telefone: string;
-  telefoneFixo: string;
-  email: string;
-  contatoPreferido: string;
-  contatoEmergencia: string;
-  telefoneEmergencia: string;
-  endereco: string;
-  cidade: string;
-  cep: string;
-};
-
-type FieldDef = { key: SOAPFieldKey; label: string; list?: boolean };
-
-const FIELDS: FieldDef[] = [
-  { key: "queixaPrincipal", label: "Queixa principal" },
-  { key: "subjetivo", label: "Subjetivo (S)" },
-  { key: "objetivo", label: "Objetivo (O)" },
-  { key: "avaliacao", label: "Avaliação (A)" },
-  { key: "plano", label: "Plano (P)" },
-  { key: "dentesEnvolvidos", label: "Dentes envolvidos", list: true },
-  { key: "procedimentos", label: "Procedimentos", list: true },
-  { key: "orientacoes", label: "Orientações ao paciente" },
-];
-
-function soapToValues(soap: ProntuarioSOAP): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const f of FIELDS) {
-    const v = soap[f.key];
-    out[f.key] = Array.isArray(v) ? v.join(", ") : String(v ?? "");
-  }
-  return out;
-}
-
-/** Renderiza o transcript com os fragmentos de evidência destacados. */
-function HighlightedTranscript({ text, quotes }: { text: string; quotes: string[] }) {
-  if (!text) return null;
-  if (!quotes.length) return <>{text}</>;
-
-  const ranges: [number, number][] = [];
-  for (const q of quotes) {
-    if (!q || q.length < 3) continue;
-    const idx = text.toLowerCase().indexOf(q.toLowerCase());
-    if (idx !== -1) ranges.push([idx, idx + q.length]);
-  }
-
-  if (!ranges.length) return <>{text}</>;
-
-  ranges.sort((a, b) => a[0] - b[0]);
-  const merged: [number, number][] = [];
-  for (const r of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
-    else merged.push([...r] as [number, number]);
-  }
-
-  const parts: React.ReactNode[] = [];
-  let cursor = 0;
-  for (const [start, end] of merged) {
-    if (cursor < start) parts.push(text.slice(cursor, start));
-    parts.push(
-      <mark key={start} className="c-evidence-mark">
-        {text.slice(start, end)}
-      </mark>
-    );
-    cursor = end;
-  }
-  if (cursor < text.length) parts.push(text.slice(cursor));
-
-  return <>{parts}</>;
-}
 
 // ---- Agenda ----
 const AG_START_H = 8;
 const AG_HOUR_H = 80;
 const AG_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
-type AgAppointment = {
-  id: number; patient: string; patientId: string;
-  date: string; // "YYYY-MM-DD"
-  startH: number; startM: number; endH: number; endM: number;
-  type: string; bg: string; border: string; color: string;
-};
+const CONSULT_TYPES = ["Consulta", "Avaliação", "Retorno", "Check-up", "Emergência"] as const;
 
-const APT_STYLE = { bg: "rgba(27,23,20,0.05)", border: "#3b82f6", color: "#1e40af" };
+const aptColors = (type: string): { bg: string; border: string; color: string } => {
+  const t = type.toLowerCase().trim();
+  if (t === "retorno")    return { bg: "rgba(59,130,246,0.1)",  border: "rgba(59,130,246,0.25)",  color: "#1d4ed8" };
+  if (t === "emergência") return { bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.25)",   color: "#b91c1c" };
+  if (t === "check-up")   return { bg: "rgba(34,197,94,0.1)",   border: "rgba(34,197,94,0.25)",   color: "#166534" };
+  // Consulta e Avaliação → laranja do design system
+  return                         { bg: "rgba(252,94,14,0.09)", border: "rgba(252,94,14,0.22)",  color: "#b84c0f" };
+};
 
 const getWeekStart = (date: Date) => {
   const d = new Date(date);
@@ -138,6 +70,50 @@ const fmtWeekDay = (d: Date) => {
 
 const fmtT = (h: number, m: number) =>
   `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+
+/** Idade em anos a partir de "YYYY-MM-DD"; null se a data for incompleta/inválida. */
+const calcAge = (iso: string): number | null => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const today = new Date();
+  let age = today.getFullYear() - y;
+  if (today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d)) age--;
+  return age >= 0 && age < 150 ? age : null;
+};
+
+/** Cor de avatar determinística a partir do nome (pastel). */
+const avatarColor = (name: string): { bg: string; fg: string } => {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return { bg: `hsl(${h} 60% 92%)`, fg: `hsl(${h} 45% 38%)` };
+};
+
+/** Tom de cor da próxima consulta conforme proximidade da data. */
+type ProxTone = "today" | "tomorrow" | "week" | "future" | "none";
+const proximaTone = (iso: string | null): ProxTone => {
+  if (!iso) return "none";
+  const [y, m, d] = iso.split("-").map(Number);
+  const target = new Date(y, m - 1, d);
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  const diff = Math.round((target.getTime() - now.getTime()) / 86400000);
+  if (diff <= 0) return "today";
+  if (diff === 1) return "tomorrow";
+  if (diff <= 7) return "week";
+  return "future";
+};
+
+const initialsOf = (nome: string, sobrenome: string) =>
+  `${(nome[0] ?? "").toUpperCase()}${(sobrenome[0] ?? "").toUpperCase()}` || "?";
+
+/** Classe de cor do badge de tipo de consulta (mesma lógica p/ tipos futuros). */
+const consultTypeClass = (type: string): string => {
+  const t = type.trim().toLowerCase();
+  if (!t || t === "consulta") return "p-ct-consulta";
+  if (t.includes("retorno")) return "p-ct-retorno";
+  if (t.includes("urg")) return "p-ct-urgencia";
+  return "p-ct-default";
+};
 
 const fmtDate = (date: Date) => {
   const s = date.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
@@ -216,23 +192,28 @@ export default function ConsultaPage() {
   const [error, setError] = useState<string>("");
   const [consent, setConsent] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [evidencias, setEvidencias] = useState<ProntuarioSOAP["evidencias"]>({});
-  const [activeField, setActiveField] = useState<SOAPFieldKey | null>(null);
+  const [prontuario, setProntuario] = useState<ProntuarioModel | null>(null);
   const [transcript, setTranscript] = useState("");
   const [liveTranscript, setLiveTranscript] = useState("");
-  const [copiedKey, setCopiedKey] = useState<string>("");
+  const [textOpen, setTextOpen] = useState(false);
+  const [manualText, setManualText] = useState("");
   const [audioUrl, setAudioUrl] = useState<string>("");
   const [audioKB, setAudioKB] = useState<number>(0);
   const [level, setLevel] = useState(0);
   const [chunksDone, setChunksDone] = useState(0);
-  const [section, setSection] = useState<"consulta" | "agenda" | "pacientes" | "financeiro">("agenda");
+  const [section, setSection] = useState<"consulta" | "agenda" | "pacientes" | "financeiro" | "consultas" | "documentos" | "estoque">("agenda");
   const [subTab, setSubTab] = useState<"prontuario" | "odontograma">("prontuario");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [patients, setPatients] = useState<PatientData[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<PatientData | null>(null);
   const [patientTab, setPatientTab] = useState<"visao-geral" | "ficha-clinica" | "odontograma" | "imagens" | "consultas" | "cobrancas">("visao-geral");
   const [newPatientOpen, setNewPatientOpen] = useState(false);
+  // Confirmação de exclusão (paciente ou consulta) — modal único reaproveitado.
+  const [confirmDelete, setConfirmDelete] = useState<
+    | { kind: "patient"; patient: PatientData }
+    | { kind: "consulta"; apt: AgAppointment }
+    | null
+  >(null);
   const [newPatientForm, setNewPatientForm] = useState({ nome: "", sobrenome: "", dataNascimento: "", genero: "", telefone: "", email: "" });
   const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
   const [agendaDate, setAgendaDate] = useState(new Date());
@@ -249,15 +230,29 @@ export default function ConsultaPage() {
   const [ncStartH, setNcStartH] = useState("09");
   const [ncStartM, setNcStartM] = useState("00");
   const [ncDuration, setNcDuration] = useState("1h");
-  const [ncTipo, setNcTipo] = useState("");
+  const [ncTipo, setNcTipo] = useState("Consulta");
+
+  // Lista de pacientes — busca, modo de visualização, filtro rápido e ordenação
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientViewMode, setPatientViewMode] = useState<"lista" | "grid">("lista");
+  const [patientFilter, setPatientFilter] = useState<"todos" | "hoje" | "sem-prontuario" | "inativos">("todos");
+  const [patientSort, setPatientSort] = useState<{
+    col: "default" | "nome" | "proxima" | "procedimento" | "convenio" | "status";
+    dir: "asc" | "desc";
+  }>({ col: "default", dir: "asc" });
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const allChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
-  const evidencePanelRef = useRef<HTMLDivElement>(null);
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Refs com contexto fresco para a geração do prontuário (evita closures stale)
+  const selectedAppointmentRef = useRef<AgAppointment | null>(null);
+  const selectedPatientRef = useRef<PatientData | null>(null);
+  const patientsRef = useRef<PatientData[]>([]);
+  const appointmentsRef = useRef<AgAppointment[]>([]);
 
   // Chunking
   const transcriptPartsRef = useRef<(string | null)[]>([]);
@@ -281,17 +276,18 @@ export default function ConsultaPage() {
   useEffect(() => {
     try { const p = localStorage.getItem("jasmin_patients"); if (p) setPatients(JSON.parse(p)); } catch {}
     try { const a = localStorage.getItem("jasmin_appointments"); if (a) setAgendaAppointments(JSON.parse(a)); } catch {}
+    try { const v = localStorage.getItem("jasmin_patient_view_mode"); if (v === "lista" || v === "grid") setPatientViewMode(v); } catch {}
     setHydrated(true);
   }, []);
+  useEffect(() => { if (hydrated) localStorage.setItem("jasmin_patient_view_mode", patientViewMode); }, [patientViewMode, hydrated]);
   useEffect(() => { if (hydrated) localStorage.setItem("jasmin_patients", JSON.stringify(patients)); }, [patients, hydrated]);
   useEffect(() => { if (hydrated) localStorage.setItem("jasmin_appointments", JSON.stringify(agendaAppointments)); }, [agendaAppointments, hydrated]);
 
-  // Scroll para a primeira evidência destacada quando o campo muda
-  useEffect(() => {
-    if (!activeField || !evidencePanelRef.current) return;
-    const mark = evidencePanelRef.current.querySelector("mark.c-evidence-mark");
-    if (mark) mark.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [activeField]);
+  // Mantém os refs em dia para a geração do prontuário
+  useEffect(() => { selectedAppointmentRef.current = selectedAppointment; }, [selectedAppointment]);
+  useEffect(() => { selectedPatientRef.current = selectedPatient; }, [selectedPatient]);
+  useEffect(() => { patientsRef.current = patients; }, [patients]);
+  useEffect(() => { appointmentsRef.current = agendaAppointments; }, [agendaAppointments]);
 
   const stopMeter = () => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
@@ -329,6 +325,61 @@ export default function ConsultaPage() {
     setChunksDone((n) => n + 1);
   }, []);
 
+  // Roda o pipeline de 5 passos e persiste o prontuário no agendamento atual.
+  const runProntuario = useCallback(async (fullTranscript: string) => {
+    const apt = selectedAppointmentRef.current;
+    const pt =
+      selectedPatientRef.current ??
+      (apt ? patientsRef.current.find((p) => p.id === apt.patientId) ?? null : null);
+
+    const paciente = {
+      nome_paciente: pt ? `${pt.nome} ${pt.sobrenome}`.trim() : apt?.patient ?? "",
+      convenio: "",
+      carteirinha: "",
+      dentista: "Dr. Usuário",
+      cro: "",
+      data: apt?.date ?? new Date().toISOString().slice(0, 10),
+    };
+
+    const historicoMd = apt
+      ? getHistoricoMd(
+          appointmentsRef.current
+            .filter((a) => a.patientId === apt.patientId && a.id !== apt.id)
+            .map((a) => a.id)
+        )
+      : "";
+
+    setStatus("processing");
+    try {
+      const res = await fetch("/api/prontuario", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transcript: fullTranscript, paciente, historicoMd }),
+      });
+      const data = (await res.json()) as { prontuario?: ProntuarioModel; error?: string };
+      if (!res.ok || !data.prontuario) throw new Error(data.error ?? "Falha ao gerar o prontuário.");
+      setProntuario(data.prontuario);
+      setTranscript(fullTranscript);
+      if (apt) {
+        saveProntuario(apt.id, data.prontuario);
+        saveTranscript(apt.id, fullTranscript);
+      }
+      setStatus("done");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Erro desconhecido.");
+      setStatus("error");
+    }
+  }, []);
+
+  // Gera o prontuário a partir de uma transcrição colada/digitada manualmente.
+  const handleManualSubmit = useCallback(async () => {
+    const t = manualText.trim();
+    if (!t) return;
+    setError("");
+    setTextOpen(false);
+    await runProntuario(t);
+  }, [manualText, runProntuario]);
+
   const finalizeTranscript = useCallback(async () => {
     setStatus("transcribing");
     await Promise.all(pendingRef.current);
@@ -344,24 +395,8 @@ export default function ConsultaPage() {
       return;
     }
 
-    setStatus("processing");
-    try {
-      const res = await fetch("/api/soap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ transcript: fullTranscript }),
-      });
-      const data = (await res.json()) as { soap?: ProntuarioSOAP; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Falha na estruturação.");
-      setValues(soapToValues(data.soap!));
-      setEvidencias(data.soap!.evidencias ?? {});
-      setTranscript(fullTranscript);
-      setStatus("done");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Erro desconhecido.");
-      setStatus("error");
-    }
-  }, []);
+    await runProntuario(fullTranscript);
+  }, [runProntuario]);
 
   const startRecording = useCallback(async () => {
     setError("");
@@ -469,24 +504,23 @@ export default function ConsultaPage() {
   }, []);
 
   const processFile = useCallback(async (file: Blob, filename: string) => {
-    setStatus("processing");
+    setStatus("transcribing");
     setError("");
     setLiveTranscript("");
     try {
       const form = new FormData();
       form.append("audio", file, filename);
-      const res = await fetch("/api/process", { method: "POST", body: form });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Falha no processamento.");
-      setValues(soapToValues(data.soap));
-      setEvidencias(data.soap.evidencias ?? {});
-      setTranscript(data.transcript ?? "");
-      setStatus("done");
+      const res = await fetch("/api/transcribe", { method: "POST", body: form });
+      const data = (await res.json()) as { transcript?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Falha na transcrição.");
+      const fullTranscript = (data.transcript ?? "").trim();
+      if (!fullTranscript) throw new Error("Transcrição vazia — verifique o arquivo de áudio.");
+      await runProntuario(fullTranscript);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erro desconhecido.");
       setStatus("error");
     }
-  }, []);
+  }, [runProntuario]);
 
   const onUploadFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -504,17 +538,11 @@ export default function ConsultaPage() {
     [processFile]
   );
 
-  const copyField = async (key: string) => {
-    await navigator.clipboard.writeText(values[key] ?? "");
-    setCopiedKey(key);
-    setTimeout(() => setCopiedKey(""), 1500);
-  };
-
   const reset = () => {
     setStatus("idle");
-    setValues({});
-    setEvidencias({});
-    setActiveField(null);
+    setProntuario(null);
+    setTextOpen(false);
+    setManualText("");
     setTranscript("");
     setLiveTranscript("");
     setError("");
@@ -531,6 +559,32 @@ export default function ConsultaPage() {
     headerChunkRef.current = null;
     pendingChunksRef.current = [];
     if (chunkFlushTimerRef.current) clearInterval(chunkFlushTimerRef.current);
+  };
+
+  // Abre a página de consulta carregando o prontuário salvo, se houver.
+  const openConsulta = (apt: AgAppointment, origin: "agenda" | "paciente") => {
+    reset();
+    setSelectedAppointment(apt);
+    setConsultaOrigin(origin);
+    setSection("consulta");
+    const saved = getProntuario(apt.id);
+    if (saved) {
+      setProntuario(saved);
+      setTranscript(getTranscript(apt.id));
+      setStatus("done");
+    }
+  };
+
+  const handleProntuarioChange = (next: ProntuarioModel) => {
+    setProntuario(next);
+    if (selectedAppointment) saveProntuario(selectedAppointment.id, next);
+  };
+
+  const handleAprovarProntuario = () => {
+    if (!prontuario) return;
+    const next: ProntuarioModel = { ...prontuario, assinatura_pendente: false };
+    setProntuario(next);
+    if (selectedAppointment) saveProntuario(selectedAppointment.id, next);
   };
 
   const handleNewPatient = (e: React.FormEvent) => {
@@ -558,6 +612,39 @@ export default function ConsultaPage() {
     setPatients((prev) => prev.map((p) => (p.id === selectedPatient.id ? updated : p)));
   };
 
+  // Apaga uma consulta: remove o agendamento e todo o dado clínico vinculado
+  // (prontuário, .md, transcrição e cobrança). Se a consulta estiver aberta, volta.
+  const deleteConsulta = (apt: AgAppointment) => {
+    deleteProntuario(apt.id);
+    deleteCobranca(apt.id);
+    setAgendaAppointments((prev) => prev.filter((a) => a.id !== apt.id));
+    if (selectedAppointment?.id === apt.id) {
+      reset();
+      setSelectedAppointment(null);
+    }
+  };
+
+  // Apaga um paciente e tudo que pende dele: agendamentos, prontuários/cobranças
+  // de cada consulta e o odontograma. Volta para a lista de pacientes.
+  const deletePatient = (patient: PatientData) => {
+    const apts = agendaAppointments.filter((a) => a.patientId === patient.id);
+    for (const a of apts) {
+      deleteProntuario(a.id);
+      deleteCobranca(a.id);
+    }
+    deleteOdontograma(patient.id);
+    setAgendaAppointments((prev) => prev.filter((a) => a.patientId !== patient.id));
+    setPatients((prev) => prev.filter((p) => p.id !== patient.id));
+    if (selectedPatient?.id === patient.id) setSelectedPatient(null);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!confirmDelete) return;
+    if (confirmDelete.kind === "patient") deletePatient(confirmDelete.patient);
+    else deleteConsulta(confirmDelete.apt);
+    setConfirmDelete(null);
+  };
+
   const handleNovaConsulta = (e: React.FormEvent) => {
     e.preventDefault();
     if (!ncPatient || !ncDate) return;
@@ -572,14 +659,14 @@ export default function ConsultaPage() {
       startM: parseInt(ncStartM, 10),
       endH: Math.floor(endTotalMin / 60) % 24,
       endM: endTotalMin % 60,
-      type: ncTipo || "Consulta",
-      ...APT_STYLE,
+      type: ncTipo,
+      ...aptColors(ncTipo),
     };
     setAgendaAppointments(prev => [...prev, apt]);
     setNcOpen(false);
     setNcSearch("");
     setNcPatient(null);
-    setNcTipo("");
+    setNcTipo("Consulta");
     setNcDuration("1h");
     setAgendaDate(new Date(ncDate + "T12:00:00"));
   };
@@ -589,6 +676,73 @@ export default function ConsultaPage() {
   ).padStart(2, "0")}`;
 
   const busy = status === "recording" || status === "transcribing" || status === "processing";
+
+  // ── Lista de pacientes: resumos agregados + filtro + ordenação (memoizados) ──
+  const EMPTY_SUMMARY: PatientSummary = {
+    patientId: "", proximaConsulta: null, ultimaConsulta: null, ultimoProcedimento: "", temProntuario: false,
+  };
+  const patientSummaries = useMemo(
+    () => getPatientSummaries(agendaAppointments),
+    // `section` força recomputar (ex.: último procedimento) ao voltar para Pacientes
+    [agendaAppointments, hydrated, section]
+  );
+  const summaryOf = useCallback(
+    (id: string) => patientSummaries[id] ?? EMPTY_SUMMARY,
+    [patientSummaries] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const proxKey = (s: PatientSummary) =>
+    s.proximaConsulta ? `${s.proximaConsulta.date} ${fmtT(s.proximaConsulta.startH, s.proximaConsulta.startM)}` : "";
+
+  const visiblePatients = useMemo(() => {
+    const todayKey = toDateKey(new Date());
+    const q = patientSearch.trim().toLowerCase();
+    const nameOf = (p: PatientData) => `${p.nome} ${p.sobrenome}`.trim().toLowerCase();
+
+    const list = patients.filter((p) => {
+      if (q && !nameOf(p).includes(q)) return false;
+      const s = summaryOf(p.id);
+      if (patientFilter === "hoje") return !!s.proximaConsulta && s.proximaConsulta.date === todayKey;
+      if (patientFilter === "sem-prontuario") return !!s.ultimaConsulta && !s.temProntuario;
+      if (patientFilter === "inativos") return p.status === "inativo";
+      return true;
+    });
+
+    const dir = patientSort.dir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      const sa = summaryOf(a.id), sb = summaryOf(b.id);
+      const na = `${a.nome} ${a.sobrenome}`.trim().toLowerCase();
+      const nb = `${b.nome} ${b.sobrenome}`.trim().toLowerCase();
+      switch (patientSort.col) {
+        case "nome": return dir * na.localeCompare(nb);
+        case "procedimento": return dir * (sa.ultimoProcedimento || "").localeCompare(sb.ultimoProcedimento || "");
+        case "convenio": return dir * (a.convenio || "Particular").localeCompare(b.convenio || "Particular");
+        case "status": return dir * a.status.localeCompare(b.status);
+        case "proxima": {
+          const ka = proxKey(sa), kb = proxKey(sb);
+          if (!ka && !kb) return na.localeCompare(nb);
+          if (!ka) return 1;
+          if (!kb) return -1;
+          return dir * ka.localeCompare(kb);
+        }
+        default: {
+          // próxima consulta asc; sem futura vão ao fim, alfabético por nome
+          const ka = proxKey(sa), kb = proxKey(sb);
+          if (!ka && !kb) return na.localeCompare(nb);
+          if (!ka) return 1;
+          if (!kb) return -1;
+          return ka.localeCompare(kb);
+        }
+      }
+    });
+    return list;
+  }, [patients, patientSearch, patientFilter, patientSort, summaryOf]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const toggleSort = (col: typeof patientSort.col) =>
+    setPatientSort((s) => (s.col === col ? { col, dir: s.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" }));
+
+  const sortArrow = (col: typeof patientSort.col) =>
+    patientSort.col === col ? (patientSort.dir === "asc" ? " ↑" : " ↓") : "";
 
   return (
     <div className="c-app">
@@ -638,6 +792,46 @@ export default function ConsultaPage() {
               <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
             </svg>
             <span>Pacientes</span>
+          </button>
+          <button
+            className={`c-sidebar-tab${section === "consultas" ? " c-sidebar-tab-active" : ""}`}
+            onClick={() => setSection("consultas")}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="4" width="18" height="18" rx="2"/>
+              <line x1="16" y1="2" x2="16" y2="6"/>
+              <line x1="8" y1="2" x2="8" y2="6"/>
+              <line x1="3" y1="10" x2="21" y2="10"/>
+              <line x1="8" y1="14" x2="16" y2="14"/>
+              <line x1="8" y1="18" x2="13" y2="18"/>
+            </svg>
+            <span>Consultas</span>
+          </button>
+          <button
+            className={`c-sidebar-tab${section === "documentos" ? " c-sidebar-tab-active" : ""}`}
+            onClick={() => setSection("documentos")}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="8" y1="13" x2="16" y2="13"/>
+              <line x1="8" y1="17" x2="16" y2="17"/>
+            </svg>
+            <span>Documentos</span>
+          </button>
+          <button
+            className={`c-sidebar-tab${section === "estoque" ? " c-sidebar-tab-active" : ""}`}
+            onClick={() => setSection("estoque")}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="8" y1="6" x2="21" y2="6"/>
+              <line x1="8" y1="12" x2="21" y2="12"/>
+              <line x1="8" y1="18" x2="21" y2="18"/>
+              <line x1="3" y1="6" x2="3.01" y2="6"/>
+              <line x1="3" y1="12" x2="3.01" y2="12"/>
+              <line x1="3" y1="18" x2="3.01" y2="18"/>
+            </svg>
+            <span>Estoque</span>
           </button>
           <button
             className={`c-sidebar-tab${section === "financeiro" ? " c-sidebar-tab-active" : ""}`}
@@ -772,8 +966,43 @@ export default function ConsultaPage() {
                     </svg>
                     <input type="file" accept="audio/*" onChange={onUploadFile} disabled={busy} />
                   </label>
+                  <button
+                    className={`c-rec-upload${busy ? " c-disabled" : ""}${textOpen ? " c-rec-text-active" : ""}`}
+                    onClick={() => setTextOpen((v) => !v)}
+                    disabled={busy}
+                    title="Colar texto da transcrição"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                      <line x1="8" y1="13" x2="16" y2="13"/>
+                      <line x1="8" y1="17" x2="16" y2="17"/>
+                    </svg>
+                  </button>
                 </div>
               </div>
+
+              {textOpen && status !== "recording" && (
+                <div className="c-text-input">
+                  <textarea
+                    className="c-text-input-area"
+                    rows={6}
+                    placeholder="Cole ou digite aqui a transcrição da consulta…"
+                    value={manualText}
+                    onChange={(e) => setManualText(e.target.value)}
+                    disabled={busy}
+                    autoFocus
+                  />
+                  <div className="c-text-input-actions">
+                    <button className="btn btn-outline btn-sm" onClick={() => { setTextOpen(false); setManualText(""); }} disabled={busy}>
+                      Cancelar
+                    </button>
+                    <button className="btn btn-solid btn-sm" onClick={handleManualSubmit} disabled={busy || !manualText.trim()}>
+                      Gerar prontuário
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {status === "recording" && (
                 <div className="c-rec-live">
@@ -789,65 +1018,27 @@ export default function ConsultaPage() {
               {status === "error" && <p className="c-status c-err">{error}</p>}
 
               <section className="c-result">
-                {FIELDS.map((f) => {
-                  const fieldEv = evidencias[f.key] ?? [];
-                  const isActive = activeField === f.key;
-                  return (
-                    <div className={`c-field ${isActive ? "c-field-active" : ""}`} key={f.key}>
-                      <div className="c-field-top">
-                        <div className="c-field-top-left">
-                          <label htmlFor={f.key}>{f.label}</label>
-                          {fieldEv.length > 0 && (
-                            <button
-                              className={`c-evidence-btn ${isActive ? "active" : ""}`}
-                              onClick={() => setActiveField(isActive ? null : f.key)}
-                              title="Ver evidência na transcrição"
-                            >
-                              {fieldEv.length} fonte{fieldEv.length > 1 ? "s" : ""}
-                            </button>
-                          )}
-                        </div>
-                        <button className="c-copy" onClick={() => copyField(f.key)}>
-                          {copiedKey === f.key ? "Copiado!" : "Copiar"}
-                        </button>
-                      </div>
-                      <textarea
-                        id={f.key}
-                        value={values[f.key] ?? ""}
-                        rows={f.list ? 1 : 3}
-                        placeholder="—"
-                        onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
-                      />
+                {prontuario ? (
+                  <>
+                    <ProntuarioView
+                      prontuario={prontuario}
+                      transcript={transcript}
+                      onChange={handleProntuarioChange}
+                      onAprovar={handleAprovarProntuario}
+                    />
+                    {transcript && (
+                      <details className="c-transcript">
+                        <summary>Ver transcrição bruta</summary>
+                        <p>{transcript}</p>
+                      </details>
+                    )}
+                  </>
+                ) : (
+                  !busy && (
+                    <div className="c-prontuario-empty">
+                      <p>Grave, envie o áudio ou cole o texto da consulta para gerar o prontuário estruturado.</p>
                     </div>
-                  );
-                })}
-
-                {transcript && (
-                  <div className="c-evidence-panel">
-                    <div className="c-evidence-panel-head">
-                      <span className="c-evidence-panel-title">Transcrição da consulta</span>
-                      {activeField ? (
-                        <span className="c-evidence-panel-active">
-                          evidências: {FIELDS.find((f) => f.key === activeField)?.label}
-                        </span>
-                      ) : (
-                        <span className="c-evidence-panel-hint">clique em "fontes" para destacar evidências</span>
-                      )}
-                    </div>
-                    <div className="c-evidence-text" ref={evidencePanelRef}>
-                      <HighlightedTranscript
-                        text={transcript}
-                        quotes={activeField ? (evidencias[activeField] ?? []) : []}
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {transcript && (
-                  <details className="c-transcript">
-                    <summary>Ver transcrição bruta</summary>
-                    <p>{transcript}</p>
-                  </details>
+                  )
                 )}
               </section>
             </>
@@ -855,86 +1046,6 @@ export default function ConsultaPage() {
 
           {section === "agenda" && (
             <div className="c-agenda-wrap">
-              {ncOpen && (
-                <div className="nc-overlay" onClick={() => setNcOpen(false)}>
-                  <form className="nc-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleNovaConsulta}>
-                    <div className="nc-header">
-                      <span className="nc-title">Nova consulta</span>
-                      <button type="button" className="nc-close" onClick={() => setNcOpen(false)}>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                        </svg>
-                      </button>
-                    </div>
-                    <div className="nc-body">
-                      <div>
-                        <label className="nc-label">Paciente *</label>
-                        <div className="nc-patient-wrap">
-                          <input
-                            className="nc-input"
-                            placeholder="Buscar paciente..."
-                            value={ncSearch}
-                            onChange={(e) => { setNcSearch(e.target.value); setNcPatient(null); setNcSearchOpen(true); }}
-                            onFocus={() => setNcSearchOpen(true)}
-                            onBlur={() => setTimeout(() => setNcSearchOpen(false), 150)}
-                            autoComplete="off"
-                          />
-                          {ncSearchOpen && (
-                            <div className="nc-patient-list">
-                              {patients.filter(p =>
-                                `${p.nome} ${p.sobrenome}`.toLowerCase().includes(ncSearch.toLowerCase())
-                              ).map(p => (
-                                <button key={p.id} type="button" className="nc-patient-opt"
-                                  onMouseDown={() => { setNcPatient(p); setNcSearch(`${p.nome} ${p.sobrenome}`); setNcSearchOpen(false); }}
-                                >
-                                  <div className="p-avatar-sm">{p.nome[0]}{p.sobrenome[0]}</div>
-                                  <div>
-                                    <div className="nc-opt-name">{p.nome} {p.sobrenome}</div>
-                                    {p.dataNascimento && <div className="nc-opt-meta">{fmtBirthDate(p.dataNascimento)}</div>}
-                                  </div>
-                                </button>
-                              ))}
-                              {patients.filter(p =>
-                                `${p.nome} ${p.sobrenome}`.toLowerCase().includes(ncSearch.toLowerCase())
-                              ).length === 0 && (
-                                <div className="nc-empty">Nenhum paciente encontrado</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="nc-label">Data *</label>
-                        <input type="date" className="nc-input" value={ncDate} onChange={(e) => setNcDate(e.target.value)} required />
-                      </div>
-                      <div className="nc-row">
-                        <div>
-                          <label className="nc-label">Início</label>
-                          <div className="nc-drum-picker">
-                            <DrumPicker items={HOURS_24} value={ncStartH} onChange={setNcStartH} />
-                            <span className="nc-drum-sep">:</span>
-                            <DrumPicker items={MINUTES_15} value={ncStartM} onChange={setNcStartM} />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="nc-label">Duração</label>
-                          <div className="nc-drum-picker">
-                            <DrumPicker items={DURATION_ITEMS} value={ncDuration} onChange={setNcDuration} wide />
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <label className="nc-label">Procedimento</label>
-                        <input className="nc-input" placeholder="Ex: Consulta de rotina, Extração..." value={ncTipo} onChange={(e) => setNcTipo(e.target.value)} />
-                      </div>
-                    </div>
-                    <div className="nc-footer">
-                      <button type="button" className="btn btn-outline btn-sm" onClick={() => setNcOpen(false)}>Cancelar</button>
-                      <button type="submit" className="btn btn-solid btn-sm" disabled={!ncPatient || !ncDate}>Agendar</button>
-                    </div>
-                  </form>
-                </div>
-              )}
               <div className="ag-toolbar">
                 <div className="ag-tabs">
                   <button
@@ -979,7 +1090,7 @@ export default function ConsultaPage() {
               </div>
 
               {agendaViewTab === "dia" && (
-                <div className="ag-grid-wrap">
+                <div className="ag-grid-wrap" data-jasmin-context="agenda_dia">
                   <div className="ag-header-row">
                     <div className="ag-time-gutter" />
                     <div className="ag-col-header">{fmtDate(agendaDate)}</div>
@@ -1000,9 +1111,11 @@ export default function ConsultaPage() {
                         {agendaAppointments.filter(a => a.date === toDateKey(agendaDate)).map(apt => {
                           const top = (apt.startH - AG_START_H) * AG_HOUR_H + apt.startM * (AG_HOUR_H / 60);
                           const height = ((apt.endH - apt.startH) * 60 + (apt.endM - apt.startM)) * (AG_HOUR_H / 60);
+                          const clrs = aptColors(apt.type);
                           return (
-                            <div key={apt.id} className="ag-appointment" style={{ top, height }}
-                              onClick={() => { reset(); setSelectedAppointment(apt); setConsultaOrigin("agenda"); setSection("consulta"); }}>
+                            <div key={apt.id} className="ag-appointment"
+                              style={{ top, height, background: clrs.bg, borderColor: clrs.border, color: clrs.color }}
+                              onClick={() => openConsulta(apt, "agenda")}>
                               <div className="ag-apt-name">{apt.patient}</div>
                               <div className="ag-apt-info">{apt.type}</div>
                               <div className="ag-apt-time">{fmtT(apt.startH, apt.startM)} – {fmtT(apt.endH, apt.endM)}</div>
@@ -1055,9 +1168,11 @@ export default function ConsultaPage() {
                               {agendaAppointments.filter(a => a.date === key).map(apt => {
                                 const top = (apt.startH - AG_START_H) * AG_HOUR_H + apt.startM * (AG_HOUR_H / 60);
                                 const height = ((apt.endH - apt.startH) * 60 + (apt.endM - apt.startM)) * (AG_HOUR_H / 60);
+                                const clrs = aptColors(apt.type);
                                 return (
-                                  <div key={apt.id} className="ag-appointment" style={{ top, height }}
-                                    onClick={() => { reset(); setSelectedAppointment(apt); setConsultaOrigin("agenda"); setSection("consulta"); }}>
+                                  <div key={apt.id} className="ag-appointment"
+                                    style={{ top, height, background: clrs.bg, borderColor: clrs.border, color: clrs.color }}
+                                    onClick={() => openConsulta(apt, "agenda")}>
                                     <div className="ag-apt-name">{apt.patient}</div>
                                     <div className="ag-apt-info">{apt.type}</div>
                                     <div className="ag-apt-time">{fmtT(apt.startH, apt.startM)} – {fmtT(apt.endH, apt.endM)}</div>
@@ -1170,43 +1285,171 @@ export default function ConsultaPage() {
               )}
 
               {!selectedPatient ? (
-                <>
-                  <div className="p-list-header">
-                    <div className="p-search">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                      </svg>
-                      <input type="text" placeholder="Buscar paciente..." />
-                    </div>
-                    <button className="btn btn-solid btn-sm" onClick={() => setNewPatientOpen(true)}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                      </svg>
-                      Novo paciente
-                    </button>
+                patients.length === 0 ? (
+                  <div className="p-empty">
+                    <h3 className="p-empty-title">Nenhum paciente cadastrado</h3>
+                    <p className="p-empty-desc">Adicione o primeiro paciente para começar a gerenciar consultas e prontuários.</p>
+                    <button className="btn btn-solid btn-sm" onClick={() => setNewPatientOpen(true)}>Adicionar paciente</button>
                   </div>
+                ) : (
+                  <>
+                    <div className="p-toolbar">
+                      <div className="p-search">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                        <input type="text" placeholder="Buscar paciente..." value={patientSearch} onChange={(e) => setPatientSearch(e.target.value)} />
+                      </div>
+                      <div className="p-toolbar-right">
+                        <div className="p-view-toggle">
+                          <button
+                            className={`p-view-btn${patientViewMode === "lista" ? " p-view-btn-active" : ""}`}
+                            onClick={() => setPatientViewMode("lista")}
+                            aria-label="Modo lista" title="Lista"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/>
+                              <line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+                            </svg>
+                          </button>
+                          <button
+                            className={`p-view-btn${patientViewMode === "grid" ? " p-view-btn-active" : ""}`}
+                            onClick={() => setPatientViewMode("grid")}
+                            aria-label="Modo grid" title="Grid"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+                              <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+                            </svg>
+                          </button>
+                        </div>
+                        <button className="btn btn-solid btn-sm" onClick={() => setNewPatientOpen(true)}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                          </svg>
+                          Novo paciente
+                        </button>
+                      </div>
+                    </div>
 
-                  {patients.length > 0 ? (
-                    <div className="p-grid">
-                      {patients.map((p) => (
-                        <button key={p.id} className="p-patient-card" onClick={() => { setSelectedPatient(p); setPatientTab("visao-geral"); }}>
-                          <div className="p-avatar-sm">{p.nome[0]}{p.sobrenome[0]}</div>
-                          <span className="p-card-name">{p.nome} {p.sobrenome}</span>
-                          <span className="p-card-meta">{fmtBirthDate(p.dataNascimento)}</span>
-                          <span className={`p-badge p-badge-${p.status}`}>
-                            {p.status === "ativo" ? "Ativo" : "Inativo"}
-                          </span>
+                    <div className="p-filters">
+                      {([
+                        { key: "todos", label: "Todos" },
+                        { key: "hoje", label: "Consulta hoje" },
+                        { key: "sem-prontuario", label: "Sem prontuário" },
+                        { key: "inativos", label: "Inativos" },
+                      ] as const).map((f) => (
+                        <button
+                          key={f.key}
+                          className={`p-filter-pill${patientFilter === f.key ? " p-filter-pill-active" : ""}`}
+                          onClick={() => setPatientFilter(f.key)}
+                        >
+                          {f.label}
                         </button>
                       ))}
                     </div>
-                  ) : (
-                    <div className="p-empty">
-                      <h3 className="p-empty-title">Nenhum paciente cadastrado</h3>
-                      <p className="p-empty-desc">Adicione o primeiro paciente para começar a gerenciar consultas e prontuários.</p>
-                      <button className="btn btn-solid btn-sm" onClick={() => setNewPatientOpen(true)}>Adicionar paciente</button>
-                    </div>
-                  )}
-                </>
+
+                    <p className="p-result-count">
+                      Mostrando {visiblePatients.length} paciente{visiblePatients.length === 1 ? "" : "s"}
+                    </p>
+
+                    {visiblePatients.length === 0 ? (
+                      <div className="p-filter-empty">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" width="32" height="32">
+                          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/>
+                        </svg>
+                        <p>
+                          {patientFilter === "hoje"
+                            ? "Nenhuma consulta agendada para hoje."
+                            : patientFilter === "sem-prontuario"
+                            ? "Todos os pacientes com consultas têm prontuário salvo. ✓"
+                            : patientFilter === "inativos"
+                            ? "Nenhum paciente inativo."
+                            : patientSearch.trim()
+                            ? `Nenhum paciente encontrado para “${patientSearch.trim()}”.`
+                            : "Nenhum paciente encontrado."}
+                        </p>
+                      </div>
+                    ) : patientViewMode === "lista" ? (
+                      <div className="p-list">
+                        <div className="p-lhead">
+                          <span className="p-col-avatar" />
+                          <button className="p-lhead-btn p-col-nome" onClick={() => toggleSort("nome")}>NOME{sortArrow("nome")}</button>
+                          <button className="p-lhead-btn p-col-prox" onClick={() => toggleSort("proxima")}>PRÓXIMA CONSULTA{sortArrow("proxima")}</button>
+                          <button className="p-lhead-btn p-col-proc" onClick={() => toggleSort("procedimento")}>ÚLTIMO PROCEDIMENTO{sortArrow("procedimento")}</button>
+                          <button className="p-lhead-btn p-col-conv" onClick={() => toggleSort("convenio")}>CONVÊNIO{sortArrow("convenio")}</button>
+                          <button className="p-lhead-btn p-col-status" onClick={() => toggleSort("status")}>STATUS{sortArrow("status")}</button>
+                        </div>
+                        {visiblePatients.map((p) => {
+                          const s = summaryOf(p.id);
+                          const age = calcAge(p.dataNascimento);
+                          const tone = proximaTone(s.proximaConsulta?.date ?? null);
+                          const col = avatarColor(`${p.nome}${p.sobrenome}`);
+                          const sub = [age != null ? `${age} anos` : null, p.genero || null].filter(Boolean).join(" · ") || "—";
+                          const proxLabel = tone === "today" ? "Hoje" : tone === "tomorrow" ? "Amanhã"
+                            : s.proximaConsulta ? s.proximaConsulta.date.split("-").reverse().join("/") : "—";
+                          return (
+                            <button key={p.id} className="p-row" data-jasmin-context="paciente" data-patient-id={p.id} onClick={() => { setSelectedPatient(p); setPatientTab("visao-geral"); }}>
+                              <span className="p-col-avatar">
+                                <span className="p-row-avatar" style={{ background: col.bg, color: col.fg }}>{initialsOf(p.nome, p.sobrenome)}</span>
+                              </span>
+                              <span className="p-col-nome">
+                                <span className="p-row-name">{p.nome} {p.sobrenome}</span>
+                                <span className="p-row-sub">{sub}</span>
+                              </span>
+                              <span className="p-col-prox">
+                                <span className={`p-next p-next-${tone}`}>{proxLabel}</span>
+                                {s.proximaConsulta && <span className="p-row-sub">{fmtT(s.proximaConsulta.startH, s.proximaConsulta.startM)}</span>}
+                              </span>
+                              <span className="p-col-proc p-row-sub p-trunc">{s.ultimoProcedimento || "—"}</span>
+                              <span className="p-col-conv"><span className="p-conv-pill">{p.convenio || "Particular"}</span></span>
+                              <span className="p-col-status"><span className={`p-badge p-badge-${p.status}`}>{p.status === "ativo" ? "Ativo" : "Inativo"}</span></span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="p-grid">
+                        {visiblePatients.map((p) => {
+                          const s = summaryOf(p.id);
+                          const age = calcAge(p.dataNascimento);
+                          const tone = proximaTone(s.proximaConsulta?.date ?? null);
+                          const col = avatarColor(`${p.nome}${p.sobrenome}`);
+                          const sub = [age != null ? `${age} anos` : null, p.genero || null].filter(Boolean).join(" · ") || "—";
+                          const proxLabel = tone === "today" ? "Hoje" : tone === "tomorrow" ? "Amanhã"
+                            : s.proximaConsulta ? s.proximaConsulta.date.split("-").reverse().join("/") : "—";
+                          const proxFull = s.proximaConsulta ? `${proxLabel} · ${fmtT(s.proximaConsulta.startH, s.proximaConsulta.startM)}` : "—";
+                          return (
+                            <button key={p.id} className="p-pcard" data-jasmin-context="paciente" data-patient-id={p.id} onClick={() => { setSelectedPatient(p); setPatientTab("visao-geral"); }}>
+                              <div className="p-pcard-l1">
+                                <span className="p-row-avatar p-pcard-avatar" style={{ background: col.bg, color: col.fg }}>{initialsOf(p.nome, p.sobrenome)}</span>
+                                <span className="p-pcard-name">{p.nome} {p.sobrenome}</span>
+                                <span className={`p-badge p-badge-${p.status}`}>{p.status === "ativo" ? "Ativo" : "Inativo"}</span>
+                              </div>
+                              <div className="p-pcard-sub">{sub}</div>
+                              <div className="p-pcard-divider" />
+                              <div className={`p-pcard-block${tone === "today" ? " p-pcard-block-today" : ""}`}>
+                                <span className="p-pcard-flabel">Próxima consulta</span>
+                                <div className="p-pcard-next">
+                                  {tone === "today" && (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="13" height="13">
+                                      <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                                    </svg>
+                                  )}
+                                  <span className={`p-next p-next-${tone}`}>{proxFull}</span>
+                                </div>
+                              </div>
+                              <div className="p-pcard-block">
+                                <span className="p-pcard-flabel">Último procedimento</span>
+                                <span className="p-pcard-proc p-trunc">{s.ultimoProcedimento || "—"}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )
               ) : (
                 <div className="p-detail">
                   {/* Sidebar do paciente */}
@@ -1245,7 +1488,7 @@ export default function ConsultaPage() {
                           <p className="p-info-block-title">Próxima Consulta</p>
                           {nextApt ? (
                             <button className="p-next-consult-btn"
-                              onClick={() => { reset(); setSelectedAppointment(nextApt); setConsultaOrigin("paciente"); setSection("consulta"); }}>
+                              onClick={() => openConsulta(nextApt, "paciente")}>
                               <span className="p-next-consult-date">{nd}/{nmo}/{ny}</span>
                               <span className="p-next-consult-time">{fmtT(nextApt.startH, nextApt.startM)} · {nextApt.type}</span>
                             </button>
@@ -1270,17 +1513,27 @@ export default function ConsultaPage() {
                       <p className="p-info-block-title">Plano de Saúde</p>
                       <p className="p-info-value">—</p>
                     </div>
+
+                    <button className="p-delete-patient-btn"
+                      onClick={() => setConfirmDelete({ kind: "patient", patient: selectedPatient })}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+                      </svg>
+                      Excluir paciente
+                    </button>
                   </aside>
 
                   {/* Conteúdo principal com abas */}
                   <div className="p-content">
                     <nav className="p-tab-nav">
-                      {(["visao-geral", "ficha-clinica", "odontograma", "imagens", "consultas", "cobrancas"] as const).map((t) => {
+                      {/* P2 — "imagens" para implementar futuramente */}
+                      {(["visao-geral", "ficha-clinica", "odontograma", "consultas", "cobrancas"] as const).map((t) => {
                         const labels: Record<string, string> = {
                           "visao-geral": "Visão Geral",
                           "ficha-clinica": "Ficha clínica",
                           "odontograma": "Odontograma",
-                          "imagens": "Imagens",
                           "consultas": "Consultas",
                           "cobrancas": "Cobranças",
                         };
@@ -1440,6 +1693,7 @@ export default function ConsultaPage() {
                       )}
 
                       {patientTab === "consultas" && (() => {
+                        const todayKey = toDateKey(new Date());
                         const apts = agendaAppointments
                           .filter(a => a.patientId === selectedPatient.id)
                           .sort((a, b) => b.date.localeCompare(a.date) || b.startH - a.startH || b.startM - a.startM);
@@ -1451,26 +1705,54 @@ export default function ConsultaPage() {
                           <div className="p-consult-list">
                             {apts.map(apt => {
                               const [y, mo, d] = apt.date.split("-");
+                              const isFuture = apt.date > todayKey;
+                              const temProntuario = hasProntuario(apt.id);
                               return (
-                                <button key={apt.id} className="p-consult-item p-consult-item-btn"
-                                  onClick={() => { reset(); setSelectedAppointment(apt); setConsultaOrigin("paciente"); setSection("consulta"); }}>
-                                  <div className="p-consult-date">{d}/{mo}/{y}</div>
-                                  <div className="p-consult-time">{fmtT(apt.startH, apt.startM)} – {fmtT(apt.endH, apt.endM)}</div>
-                                  <div className="p-consult-type">{apt.type}</div>
-                                  <svg className="p-consult-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="9 18 15 12 9 6"/>
-                                  </svg>
-                                </button>
+                                <div key={apt.id} className="p-consult-row">
+                                  <button className={`p-consult-item p-consult-item-btn${isFuture ? " p-consult-item-future" : ""}`}
+                                    data-jasmin-context="consulta" data-appointment-id={apt.id}
+                                    onClick={() => openConsulta(apt, "paciente")}>
+                                    <div className="p-consult-main">
+                                      <span className="p-consult-date">{d}/{mo}/{y}</span>
+                                      <span className="p-consult-time">{fmtT(apt.startH, apt.startM)} – {fmtT(apt.endH, apt.endM)}</span>
+                                    </div>
+                                    <div className="p-consult-badges">
+                                      <span className={`p-consult-type-badge ${consultTypeClass(apt.type)}`}>{apt.type || "Consulta"}</span>
+                                      <span className={`p-consult-status-badge ${temProntuario ? "p-consult-status-saved" : "p-consult-status-none"}`}>
+                                        {temProntuario ? "Prontuário salvo" : "Sem prontuário"}
+                                      </span>
+                                    </div>
+                                    <svg className="p-consult-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="9 18 15 12 9 6"/>
+                                    </svg>
+                                  </button>
+                                  <button className="p-consult-del" title="Excluir consulta" aria-label="Excluir consulta"
+                                    onClick={() => setConfirmDelete({ kind: "consulta", apt })}>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="3 6 5 6 21 6"/>
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                      <line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
+                                    </svg>
+                                  </button>
+                                </div>
                               );
                             })}
                           </div>
                         );
                       })()}
 
-                      {patientTab !== "visao-geral" && patientTab !== "consultas" && (
-                        <div className="p-tab-placeholder">
-                          <p>Em breve.</p>
+                      {patientTab === "ficha-clinica" && (
+                        <FichaClinica patient={selectedPatient} onUpdatePatient={updatePatient} />
+                      )}
+
+                      {patientTab === "odontograma" && (
+                        <div data-jasmin-context="odontograma" data-patient-id={selectedPatient.id}>
+                          <Odontograma patientId={selectedPatient.id} />
                         </div>
+                      )}
+
+                      {patientTab === "cobrancas" && (
+                        <Cobrancas patientId={selectedPatient.id} />
                       )}
                     </div>
                   </div>
@@ -1480,14 +1762,179 @@ export default function ConsultaPage() {
           )}
 
           {section === "financeiro" && (
-            <div className="c-placeholder">
-              <h1 className="c-page-title">Financeiro</h1>
-              <p className="c-sub">Em breve.</p>
+            <Financeiro
+              onOpenPatientCobrancas={(patientId) => {
+                const p = patients.find((x) => x.id === patientId);
+                if (p) {
+                  setSelectedPatient(p);
+                  setPatientTab("cobrancas");
+                  setSection("pacientes");
+                }
+              }}
+            />
+          )}
+
+          {section === "consultas" && (
+            <ConsultasView
+              appointments={agendaAppointments}
+              patients={patients}
+              onOpenConsulta={(apt) => openConsulta(apt, "agenda")}
+              onNovaConsulta={() => { setNcDate(toDateKey(new Date())); setNcOpen(true); }}
+            />
+          )}
+
+          {section === "documentos" && (
+            <DocumentosView />
+          )}
+
+          {section === "estoque" && (
+            <div className="p-wrap">
+              <div className="p-empty">
+                <h3 className="p-empty-title">Estoque em breve</h3>
+                <p className="p-empty-desc">O controle de estoque de materiais e insumos estará disponível em breve.</p>
+              </div>
             </div>
           )}
 
         </main>
       </div>
+
+      {ncOpen && (
+        <div className="nc-overlay" onClick={() => setNcOpen(false)}>
+          <form className="nc-modal" onClick={(e) => e.stopPropagation()} onSubmit={handleNovaConsulta}>
+            <div className="nc-header">
+              <span className="nc-title">Nova consulta</span>
+              <button type="button" className="nc-close" onClick={() => setNcOpen(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <div className="nc-body">
+              <div>
+                <label className="nc-label">Paciente *</label>
+                <div className="nc-patient-wrap">
+                  <input
+                    className="nc-input"
+                    placeholder="Buscar paciente..."
+                    value={ncSearch}
+                    onChange={(e) => { setNcSearch(e.target.value); setNcPatient(null); setNcSearchOpen(true); }}
+                    onFocus={() => setNcSearchOpen(true)}
+                    onBlur={() => setTimeout(() => setNcSearchOpen(false), 150)}
+                    autoComplete="off"
+                  />
+                  {ncSearchOpen && (
+                    <div className="nc-patient-list">
+                      {patients.filter(p =>
+                        `${p.nome} ${p.sobrenome}`.toLowerCase().includes(ncSearch.toLowerCase())
+                      ).map(p => (
+                        <button key={p.id} type="button" className="nc-patient-opt"
+                          onMouseDown={() => { setNcPatient(p); setNcSearch(`${p.nome} ${p.sobrenome}`); setNcSearchOpen(false); }}
+                        >
+                          <div className="p-avatar-sm">{p.nome[0]}{p.sobrenome[0]}</div>
+                          <div>
+                            <div className="nc-opt-name">{p.nome} {p.sobrenome}</div>
+                            {p.dataNascimento && <div className="nc-opt-meta">{fmtBirthDate(p.dataNascimento)}</div>}
+                          </div>
+                        </button>
+                      ))}
+                      {patients.filter(p =>
+                        `${p.nome} ${p.sobrenome}`.toLowerCase().includes(ncSearch.toLowerCase())
+                      ).length === 0 && (
+                        <div className="nc-empty">Nenhum paciente encontrado</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label className="nc-label">Tipo de consulta</label>
+                <div className="nc-type-pills">
+                  {CONSULT_TYPES.map((t) => {
+                    const clrs = aptColors(t);
+                    const active = ncTipo === t;
+                    return (
+                      <button
+                        key={t}
+                        type="button"
+                        className={`nc-type-pill${active ? " nc-type-pill-active" : ""}`}
+                        style={active ? { background: clrs.bg, borderColor: clrs.border, color: clrs.color } : undefined}
+                        onClick={() => setNcTipo(t)}
+                      >
+                        {t}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <label className="nc-label">Data *</label>
+                <input type="date" className="nc-input" value={ncDate} onChange={(e) => setNcDate(e.target.value)} required />
+              </div>
+              <div className="nc-row">
+                <div>
+                  <label className="nc-label">Início</label>
+                  <div className="nc-drum-picker">
+                    <DrumPicker items={HOURS_24} value={ncStartH} onChange={setNcStartH} />
+                    <span className="nc-drum-sep">:</span>
+                    <DrumPicker items={MINUTES_15} value={ncStartM} onChange={setNcStartM} />
+                  </div>
+                </div>
+                <div>
+                  <label className="nc-label">Duração</label>
+                  <div className="nc-drum-picker">
+                    <DrumPicker items={DURATION_ITEMS} value={ncDuration} onChange={setNcDuration} wide />
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div className="nc-footer">
+              <button type="button" className="btn btn-outline btn-sm" onClick={() => setNcOpen(false)}>Cancelar</button>
+              <button type="submit" className="btn btn-solid btn-sm" disabled={!ncPatient || !ncDate}>Agendar</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {confirmDelete && (() => {
+        const cd = confirmDelete;
+        const nConsultas = cd.kind === "patient"
+          ? agendaAppointments.filter((a) => a.patientId === cd.patient.id).length
+          : 0;
+        return (
+          <div className="p-modal-overlay" onClick={() => setConfirmDelete(null)}>
+            <div className="p-confirm-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="p-confirm-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+              <h2 className="p-confirm-title">
+                {cd.kind === "patient" ? "Excluir paciente?" : "Excluir consulta?"}
+              </h2>
+              <p className="p-confirm-text">
+                {cd.kind === "patient" ? (
+                  <>
+                    Tudo de <strong>{cd.patient.nome} {cd.patient.sobrenome}</strong> será apagado:
+                    {nConsultas > 0 ? ` ${nConsultas} consulta${nConsultas === 1 ? "" : "s"}, ` : " "}
+                    prontuários, odontograma e cobranças. Esta ação não pode ser desfeita.
+                  </>
+                ) : (
+                  <>
+                    A consulta de <strong>{cd.apt.date.split("-").reverse().join("/")}</strong> ({cd.apt.type || "Consulta"}) e o prontuário,
+                    transcrição e cobrança vinculados serão apagados. Esta ação não pode ser desfeita.
+                  </>
+                )}
+              </p>
+              <div className="p-confirm-actions">
+                <button className="btn btn-outline btn-sm" onClick={() => setConfirmDelete(null)}>Cancelar</button>
+                <button className="btn btn-danger btn-sm" onClick={handleConfirmDelete}>Excluir</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 
