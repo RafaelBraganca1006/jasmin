@@ -5479,3 +5479,19 @@ body.selecting-context [data-jasmin-context]:hover {
 .cs-step-body { display: flex; flex-direction: column; gap: 1px; }
 .cs-step-title { font-size: 14px; font-weight: 600; color: var(--ink); }
 .cs-step-sub { font-size: 12px; color: var(--ink-soft); }
+
+/* Modo Demo: transcrições prontas para colar */
+.dm-modal { max-height: calc(100vh - 48px); overflow-y: auto; }
+.dm-tx { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: rgba(27, 23, 20, 0.04); text-align: left; }
+.dm-tx-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.dm-tx-head b { font-size: 13px; font-weight: 600; color: var(--ink); }
+.dm-tx-head small { font-size: 11.5px; line-height: 1.4; color: var(--ink-soft); }
+.dm-tx-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dm-tx-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: #fff; border: 1px solid rgba(27, 23, 20, 0.08); }
+.dm-tx-hora { flex: none; font-size: 12px; font-weight: 600; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+.dm-tx-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.dm-tx-nome { font-size: 13px; font-weight: 600; color: var(--ink); }
+.dm-tx-sub { font-size: 11.5px; line-height: 1.35; color: var(--ink-soft); }
+.dm-tx-copy { flex: none; padding: 5px 10px; border-radius: 8px; border: 1px solid rgba(27, 23, 20, 0.16); background: #fff; font-family: inherit; font-size: 12px; font-weight: 500; color: var(--ink); cursor: pointer; transition: border-color .14s, color .14s, background .14s; }
+.dm-tx-copy:hover { border-color: var(--primary); color: var(--primary); }
+.dm-tx-copy-on { border-color: #16a34a; color: #16a34a; background: #f0fdf4; }

@@ -21,6 +21,7 @@ import { deleteCobranca } from "@/lib/cobranca-storage";
 import { getPrestador } from "@/lib/prestador-storage";
 import type { PatientSummary } from "@/lib/types-prontuario";
 import type { PatientData, AgAppointment } from "@/lib/types-jasmin";
+import { DEMO_TRANSCRICOES } from "@/lib/demo-transcricoes";
 import { loadDemoData, clearAllLocalData, getDemoMode, getDemoRef, DEMO_MODES, type DemoMode } from "@/lib/demo-data";
 
 type PatientView = "todos" | "hoje" | "sem-prontuario" | "a-faturar" | "glosa" | "sem-retorno" | "inativos";
@@ -179,6 +180,7 @@ export default function ConsultaPage() {
   const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
+  const [demoCopied, setDemoCopied] = useState<number | null>(null);
   const [demoMode, setDemoMode] = useState<DemoMode>("simples");
   const [demoRef, setDemoRef] = useState(() => {
     // padrão: a próxima segunda-feira (hoje, se já for segunda) — dia típico de apresentação
@@ -1845,7 +1847,7 @@ export default function ConsultaPage() {
 
       {demoOpen && (
         <div className="p-modal-overlay" onClick={() => setDemoOpen(false)}>
-          <div className="p-confirm-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="p-confirm-modal dm-modal" onClick={(e) => e.stopPropagation()}>
             <div className="p-confirm-icon" style={{ background: "rgba(252,94,14,0.1)", color: "#fc5e0e" }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/>
@@ -1877,6 +1879,47 @@ export default function ConsultaPage() {
               </span>
               <input type="date" value={demoRef} min={toDateKey(new Date())} onChange={(e) => e.target.value && setDemoRef(e.target.value)} />
             </label>
+            <div className="dm-tx">
+              <div className="dm-tx-head">
+                <b>Transcrições para colar</b>
+                <small>Pacientes do dia na Demo simples. Copie e cole em &ldquo;Colar texto da transcrição&rdquo; na consulta. Espere ~1 min entre uma geração e outra.</small>
+              </div>
+              <ul className="dm-tx-list">
+                {DEMO_TRANSCRICOES.map((t, i) => (
+                  <li key={t.paciente} className="dm-tx-row">
+                    <span className="dm-tx-hora">{t.hora}</span>
+                    <span className="dm-tx-body">
+                      <span className="dm-tx-nome">{t.paciente}</span>
+                      <span className="dm-tx-sub">{t.mostra}</span>
+                    </span>
+                    <button
+                      type="button"
+                      className={`dm-tx-copy${demoCopied === i ? " dm-tx-copy-on" : ""}`}
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(t.texto);
+                        } catch {
+                          // Fallback quando a API de clipboard é negada (ex.: navegador sem permissão).
+                          const ta = document.createElement("textarea");
+                          ta.value = t.texto;
+                          ta.style.position = "fixed";
+                          ta.style.opacity = "0";
+                          document.body.appendChild(ta);
+                          ta.select();
+                          const ok = document.execCommand("copy");
+                          ta.remove();
+                          if (!ok) return;
+                        }
+                        setDemoCopied(i);
+                        setTimeout(() => setDemoCopied((c) => (c === i ? null : c)), 1800);
+                      }}
+                    >
+                      {demoCopied === i ? "Copiado ✓" : "Copiar"}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
             <p className="p-confirm-text" style={{ marginTop: 16 }}>
               <strong>Atenção:</strong> isso substitui todos os dados locais atuais deste navegador.
             </p>
