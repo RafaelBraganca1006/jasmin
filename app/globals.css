@@ -5447,7 +5447,7 @@ body.selecting-context [data-jasmin-context]:hover {
 /* ============ Telas da consulta: gravando, colando, processando ============ */
 .c-result:has(.cs) { background: transparent; border: none; box-shadow: none; border-radius: 0; padding: 0; }
 .cs { display: flex; flex-direction: column; gap: 18px; max-width: 860px; padding-top: 28px; }
-.cs-center { align-items: center; text-align: center; gap: 12px; padding-top: 96px; }
+.cs-center { align-items: center; text-align: center; gap: 12px; padding-top: 96px; width: 100%; margin-inline: auto; }
 .cs-bar { display: flex; align-items: center; gap: 14px; padding-bottom: 22px; margin-bottom: 8px; border-bottom: 1px solid var(--ui-line); }
 .cs-live-dot { width: 10px; height: 10px; border-radius: 50%; background: #dc2626; animation: cs-pulse 1.4s ease-in-out infinite; }
 @keyframes cs-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.8); } }
