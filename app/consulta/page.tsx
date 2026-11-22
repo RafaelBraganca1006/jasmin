@@ -1,5 +1,7 @@
 "use client";
 
+import ConsultaEmpty from "@/app/consulta/components/ConsultaEmpty";
+import { ConsultaRecording, ConsultaPaste, ConsultaWorking } from "@/app/consulta/components/ConsultaStages";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ProntuarioView from "@/app/components/ProntuarioView";
 import FichaClinica from "@/app/consulta/components/FichaClinica";
@@ -8,65 +10,35 @@ import Financeiro from "@/app/consulta/components/Financeiro";
 import Odontograma from "@/app/consulta/components/Odontograma";
 import ConsultasView from "@/app/consulta/components/ConsultasView";
 import DocumentosView from "@/app/consulta/components/DocumentosView";
+import Agenda, { type AgendaView } from "@/app/consulta/components/Agenda";
+import { Tabs, SectionTitle, Button, IconButton, Avatar, PatientHeader, Status, Tag } from "@/app/components/ui";
+import PatientOverviewView, { PatientFlags } from "@/app/consulta/components/PatientOverview";
+import { buildPatientOverviews, type PatientOverview } from "@/lib/patient-overview";
+import { aptColors, CONSULT_TYPES, toDateKey } from "@/lib/agenda-utils";
 import type { ProntuarioModel } from "@/lib/types-prontuario";
 import { getProntuario, saveProntuario, getHistoricoMd, saveTranscript, getTranscript, hasProntuario, getPatientSummaries, deleteProntuario, deleteOdontograma } from "@/lib/prontuario-storage";
 import { deleteCobranca } from "@/lib/cobranca-storage";
+import { getPrestador } from "@/lib/prestador-storage";
 import type { PatientSummary } from "@/lib/types-prontuario";
 import type { PatientData, AgAppointment } from "@/lib/types-jasmin";
+import { loadDemoData, clearAllLocalData, getDemoMode, getDemoRef, DEMO_MODES, type DemoMode } from "@/lib/demo-data";
+
+type PatientView = "todos" | "hoje" | "sem-prontuario" | "a-faturar" | "glosa" | "sem-retorno" | "inativos";
+const PATIENT_VIEWS: { key: PatientView; label: string }[] = [
+  { key: "todos", label: "Todos" },
+  { key: "hoje", label: "Consulta hoje" },
+  { key: "sem-prontuario", label: "Sem prontuário" },
+  { key: "a-faturar", label: "A faturar" },
+  { key: "glosa", label: "Glosas" },
+  { key: "sem-retorno", label: "Sem retorno agendado" },
+  { key: "inativos", label: "Inativos" },
+];
+const normText = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** A cada quantos ms o áudio acumulado é enviado ao Whisper (menor = texto mais "ao vivo"). */
+const LIVE_CHUNK_MS = 10_000;
 
 type Status = "idle" | "recording" | "transcribing" | "processing" | "done" | "error";
-
-// ---- Agenda ----
-const AG_START_H = 8;
-const AG_HOUR_H = 80;
-const AG_HOURS = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
-
-const CONSULT_TYPES = ["Consulta", "Avaliação", "Retorno", "Check-up", "Emergência"] as const;
-
-const aptColors = (type: string): { bg: string; border: string; color: string } => {
-  const t = type.toLowerCase().trim();
-  if (t === "retorno")    return { bg: "rgba(59,130,246,0.1)",  border: "rgba(59,130,246,0.25)",  color: "#1d4ed8" };
-  if (t === "emergência") return { bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.25)",   color: "#b91c1c" };
-  if (t === "check-up")   return { bg: "rgba(34,197,94,0.1)",   border: "rgba(34,197,94,0.25)",   color: "#166534" };
-  // Consulta e Avaliação → laranja do design system
-  return                         { bg: "rgba(252,94,14,0.09)", border: "rgba(252,94,14,0.22)",  color: "#b84c0f" };
-};
-
-const getWeekStart = (date: Date) => {
-  const d = new Date(date);
-  const day = d.getDay();
-  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-
-const getWeekDays = (date: Date) =>
-  Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(getWeekStart(date));
-    d.setDate(d.getDate() + i);
-    return d;
-  });
-
-const toDateKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-const fmtWeekRange = (date: Date) => {
-  const days = getWeekDays(date);
-  const start = days[0];
-  const end = days[6];
-  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
-  const sm = cap(start.toLocaleDateString("pt-BR", { month: "long" }));
-  const em = cap(end.toLocaleDateString("pt-BR", { month: "long" }));
-  const yr = end.getFullYear();
-  if (start.getMonth() === end.getMonth())
-    return `${start.getDate()}–${end.getDate()} de ${sm}, ${yr}`;
-  return `${start.getDate()} de ${sm} – ${end.getDate()} de ${em}, ${yr}`;
-};
-
-const fmtWeekDay = (d: Date) => {
-  const wd = d.toLocaleDateString("pt-BR", { weekday: "short" });
-  return `${wd.charAt(0).toUpperCase() + wd.slice(1).replace(".", "")} ${d.getDate()}`;
-};
 
 const fmtT = (h: number, m: number) =>
   `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
@@ -80,13 +52,6 @@ const calcAge = (iso: string): number | null => {
   let age = today.getFullYear() - y;
   if (today.getMonth() + 1 < m || (today.getMonth() + 1 === m && today.getDate() < d)) age--;
   return age >= 0 && age < 150 ? age : null;
-};
-
-/** Cor de avatar determinística a partir do nome (pastel). */
-const avatarColor = (name: string): { bg: string; fg: string } => {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
-  return { bg: `hsl(${h} 60% 92%)`, fg: `hsl(${h} 45% 38%)` };
 };
 
 /** Tom de cor da próxima consulta conforme proximidade da data. */
@@ -103,9 +68,6 @@ const proximaTone = (iso: string | null): ProxTone => {
   return "future";
 };
 
-const initialsOf = (nome: string, sobrenome: string) =>
-  `${(nome[0] ?? "").toUpperCase()}${(sobrenome[0] ?? "").toUpperCase()}` || "?";
-
 /** Classe de cor do badge de tipo de consulta (mesma lógica p/ tipos futuros). */
 const consultTypeClass = (type: string): string => {
   const t = type.trim().toLowerCase();
@@ -113,11 +75,6 @@ const consultTypeClass = (type: string): string => {
   if (t.includes("retorno")) return "p-ct-retorno";
   if (t.includes("urg")) return "p-ct-urgencia";
   return "p-ct-default";
-};
-
-const fmtDate = (date: Date) => {
-  const s = date.toLocaleDateString("pt-BR", { weekday: "long", day: "numeric", month: "long" });
-  return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
 const MONTHS_PT = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
@@ -188,6 +145,10 @@ function DrumPicker({ items, value, onChange, wide }: { items: string[]; value: 
 }
 
 export default function ConsultaPage() {
+  // Nome do dentista (dados do prestador, ex.: "Dra. Helena Duarte" na demo). Lido após montar (localStorage).
+  const [dentistaNome, setDentistaNome] = useState("Dr. Usuário");
+  useEffect(() => { setDentistaNome(getPrestador().dentista_nome || "Dr. Usuário"); }, []);
+  const dentistaIniciais = dentistaNome.replace(/^(Dra?\.?\s+)/i, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "DR";
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string>("");
   const [consent, setConsent] = useState(false);
@@ -216,8 +177,17 @@ export default function ConsultaPage() {
   >(null);
   const [newPatientForm, setNewPatientForm] = useState({ nome: "", sobrenome: "", dataNascimento: "", genero: "", telefone: "", email: "" });
   const [avatarDropdownOpen, setAvatarDropdownOpen] = useState(false);
+  const [demoOpen, setDemoOpen] = useState(false);
+  const [demoActive, setDemoActive] = useState(false);
+  const [demoMode, setDemoMode] = useState<DemoMode>("simples");
+  const [demoRef, setDemoRef] = useState(() => {
+    // padrão: a próxima segunda-feira (hoje, se já for segunda) — dia típico de apresentação
+    const d = new Date();
+    d.setDate(d.getDate() + ((8 - d.getDay()) % 7));
+    return toDateKey(d);
+  });
   const [agendaDate, setAgendaDate] = useState(new Date());
-  const [agendaViewTab, setAgendaViewTab] = useState<"dia" | "semana">("dia");
+  const [agendaViewTab, setAgendaViewTab] = useState<AgendaView>("semana");
   const [agendaAppointments, setAgendaAppointments] = useState<AgAppointment[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<AgAppointment | null>(null);
@@ -235,7 +205,8 @@ export default function ConsultaPage() {
   // Lista de pacientes — busca, modo de visualização, filtro rápido e ordenação
   const [patientSearch, setPatientSearch] = useState("");
   const [patientViewMode, setPatientViewMode] = useState<"lista" | "grid">("lista");
-  const [patientFilter, setPatientFilter] = useState<"todos" | "hoje" | "sem-prontuario" | "inativos">("todos");
+  const [patientFilter, setPatientFilter] = useState<PatientView>("todos");
+  const [patientConvenio, setPatientConvenio] = useState("todos");
   const [patientSort, setPatientSort] = useState<{
     col: "default" | "nome" | "proxima" | "procedimento" | "convenio" | "status";
     dir: "asc" | "desc";
@@ -247,6 +218,7 @@ export default function ConsultaPage() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
+  const audioFileRef = useRef<HTMLInputElement>(null);
 
   // Refs com contexto fresco para a geração do prontuário (evita closures stale)
   const selectedAppointmentRef = useRef<AgAppointment | null>(null);
@@ -277,6 +249,15 @@ export default function ConsultaPage() {
     try { const p = localStorage.getItem("jasmin_patients"); if (p) setPatients(JSON.parse(p)); } catch {}
     try { const a = localStorage.getItem("jasmin_appointments"); if (a) setAgendaAppointments(JSON.parse(a)); } catch {}
     try { const v = localStorage.getItem("jasmin_patient_view_mode"); if (v === "lista" || v === "grid") setPatientViewMode(v); } catch {}
+    const dm = getDemoMode();
+    setDemoActive(dm !== null);
+    if (dm) setDemoMode(dm);
+    // A demo carregada para um dia futuro abre a agenda direto naquela semana.
+    const ref = getDemoRef();
+    if (dm && ref && ref >= toDateKey(new Date())) {
+      setAgendaDate(new Date(`${ref}T12:00:00`));
+      setDemoRef(ref);
+    }
     setHydrated(true);
   }, []);
   useEffect(() => { if (hydrated) localStorage.setItem("jasmin_patient_view_mode", patientViewMode); }, [patientViewMode, hydrated]);
@@ -332,12 +313,13 @@ export default function ConsultaPage() {
       selectedPatientRef.current ??
       (apt ? patientsRef.current.find((p) => p.id === apt.patientId) ?? null : null);
 
+    const prestador = getPrestador();
     const paciente = {
       nome_paciente: pt ? `${pt.nome} ${pt.sobrenome}`.trim() : apt?.patient ?? "",
-      convenio: "",
-      carteirinha: "",
-      dentista: "Dr. Usuário",
-      cro: "",
+      convenio: pt?.convenio ?? "",
+      carteirinha: pt?.carteirinha ?? "",
+      dentista: prestador.dentista_nome || "Dr. Usuário",
+      cro: prestador.dentista_cro ?? "",
       data: apt?.date ?? new Date().toISOString().slice(0, 10),
     };
 
@@ -487,7 +469,7 @@ export default function ConsultaPage() {
 
       mediaRecorderRef.current = mr;
       mr.start(1000); // chunks frequentes para o level meter e para batching confiável
-      chunkFlushTimerRef.current = setInterval(flushPendingChunks, 60_000);
+      chunkFlushTimerRef.current = setInterval(flushPendingChunks, LIVE_CHUNK_MS);
       setStatus("recording");
       setElapsed(0);
       timerRef.current = setInterval(() => setElapsed((s) => s + 1), 1000);
@@ -645,6 +627,21 @@ export default function ConsultaPage() {
     setConfirmDelete(null);
   };
 
+  // Abre o modal completo "Nova consulta" já preenchido (vem da criação rápida da agenda).
+  const openNewConsulta = (p: { dateKey: string; startMin: number; endMin: number; patient: PatientData | null; type: string }) => {
+    const dur = p.endMin - p.startMin;
+    const label = DURATION_ITEMS.reduce((best, k) =>
+      Math.abs(DURATION_MINS[k] - dur) < Math.abs(DURATION_MINS[best] - dur) ? k : best, DURATION_ITEMS[3]);
+    setNcDate(p.dateKey);
+    setNcStartH(String(Math.floor(p.startMin / 60)).padStart(2, "0"));
+    setNcStartM(String(p.startMin % 60).padStart(2, "0"));
+    setNcDuration(label);
+    setNcPatient(p.patient);
+    setNcSearch(p.patient ? `${p.patient.nome} ${p.patient.sobrenome}` : "");
+    setNcTipo(p.type);
+    setNcOpen(true);
+  };
+
   const handleNovaConsulta = (e: React.FormEvent) => {
     e.preventDefault();
     if (!ncPatient || !ncDate) return;
@@ -694,18 +691,56 @@ export default function ConsultaPage() {
   const proxKey = (s: PatientSummary) =>
     s.proximaConsulta ? `${s.proximaConsulta.date} ${fmtT(s.proximaConsulta.startH, s.proximaConsulta.startM)}` : "";
 
+  // Visão 360° de cada paciente (alertas, financeiro, linha do tempo) — lê o storage uma vez.
+  const patientOverviews = useMemo<Record<string, PatientOverview>>(
+    () => (hydrated ? buildPatientOverviews(patients, agendaAppointments) : {}),
+    // `section`/`patientTab` recomputam ao voltar de Cobranças/Consulta com dados novos
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [patients, agendaAppointments, hydrated, section, patientTab, selectedPatient]
+  );
+
+  const matchesView = useCallback(
+    (view: PatientView, p: PatientData, todayKey: string) => {
+      const s = summaryOf(p.id);
+      const ov = patientOverviews[p.id];
+      switch (view) {
+        case "hoje": return !!s.proximaConsulta && s.proximaConsulta.date === todayKey;
+        case "sem-prontuario": return !!s.ultimaConsulta && !s.temProntuario;
+        case "a-faturar": return !!p.convenio && !!ov && ov.financeiro.nRevisar + ov.financeiro.nSemGuia > 0;
+        case "glosa": return !!ov && ov.financeiro.nGlosadas > 0;
+        case "sem-retorno": return p.status === "ativo" && !!s.ultimaConsulta && !s.proximaConsulta;
+        case "inativos": return p.status === "inativo";
+        default: return true;
+      }
+    },
+    [summaryOf, patientOverviews]
+  );
+
+  const viewCounts = useMemo(() => {
+    const todayKey = toDateKey(new Date());
+    const out = {} as Record<PatientView, number>;
+    for (const v of PATIENT_VIEWS) out[v.key] = patients.filter((p) => matchesView(v.key, p, todayKey)).length;
+    return out;
+  }, [patients, matchesView]);
+
+  const convenioOptions = useMemo(
+    () => Array.from(new Set(patients.map((p) => p.convenio || "Particular"))).sort((a, b) => a.localeCompare(b)),
+    [patients]
+  );
+
   const visiblePatients = useMemo(() => {
     const todayKey = toDateKey(new Date());
-    const q = patientSearch.trim().toLowerCase();
-    const nameOf = (p: PatientData) => `${p.nome} ${p.sobrenome}`.trim().toLowerCase();
+    const q = normText(patientSearch.trim());
+    const qDigits = patientSearch.replace(/\D/g, "");
 
     const list = patients.filter((p) => {
-      if (q && !nameOf(p).includes(q)) return false;
-      const s = summaryOf(p.id);
-      if (patientFilter === "hoje") return !!s.proximaConsulta && s.proximaConsulta.date === todayKey;
-      if (patientFilter === "sem-prontuario") return !!s.ultimaConsulta && !s.temProntuario;
-      if (patientFilter === "inativos") return p.status === "inativo";
-      return true;
+      if (q) {
+        const hay = normText(`${p.nome} ${p.sobrenome} ${p.nomePreferido ?? ""} ${p.carteirinha ?? ""} ${p.email ?? ""}`);
+        const digits = `${p.cpf ?? ""}${p.telefone ?? ""}${p.carteirinha ?? ""}`.replace(/\D/g, "");
+        if (!hay.includes(q) && !(qDigits.length >= 3 && digits.includes(qDigits))) return false;
+      }
+      if (patientConvenio !== "todos" && (p.convenio || "Particular") !== patientConvenio) return false;
+      return matchesView(patientFilter, p, todayKey);
     });
 
     const dir = patientSort.dir === "asc" ? 1 : -1;
@@ -736,7 +771,7 @@ export default function ConsultaPage() {
       }
     });
     return list;
-  }, [patients, patientSearch, patientFilter, patientSort, summaryOf]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [patients, patientSearch, patientFilter, patientConvenio, patientSort, summaryOf, matchesView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleSort = (col: typeof patientSort.col) =>
     setPatientSort((s) => (s.col === col ? { col, dir: s.dir === "asc" ? "desc" : "asc" } : { col, dir: "asc" }));
@@ -848,8 +883,8 @@ export default function ConsultaPage() {
         <div className="c-sidebar-bottom">
           <div className="c-sidebar-avatar-wrap" ref={avatarDropdownRef}>
             <button className="c-sidebar-avatar" onClick={() => setAvatarDropdownOpen((v) => !v)} aria-label="Menu do usuário">
-              <div className="c-avatar">DR</div>
-              {sidebarOpen && <span className="c-avatar-name">Dr. Usuário</span>}
+              <div className="c-avatar">{dentistaIniciais}</div>
+              {sidebarOpen && <span className="c-avatar-name">{dentistaNome}</span>}
             </button>
             {avatarDropdownOpen && (
               <div className="c-avatar-dropdown">
@@ -884,6 +919,13 @@ export default function ConsultaPage() {
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                   </svg>
                   Configurações
+                </button>
+                <button className="c-dropdown-item" onClick={() => { setAvatarDropdownOpen(false); setDemoOpen(true); }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/>
+                    <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z"/>
+                  </svg>
+                  Modo Demo{demoActive ? " (ativo)" : ""}
                 </button>
                 <div className="c-dropdown-divider" />
                 <button className="c-dropdown-item c-dropdown-danger">
@@ -924,270 +966,111 @@ export default function ConsultaPage() {
                   </button>
                 </div>
                 {selectedAppointment && (() => {
-                  const pt = patients.find(p => p.id === selectedAppointment.patientId);
                   const [y, mo, d] = selectedAppointment.date.split("-");
                   return (
                     <div className="c-consult-context">
-                      <div className="c-consult-avatar">
-                        {pt ? `${pt.nome[0]}${pt.sobrenome[0]}` : selectedAppointment.patient.split(" ").map(w => w[0]).slice(0,2).join("")}
-                      </div>
-                      <div className="c-consult-info">
-                        <span className="c-consult-name">{selectedAppointment.patient}</span>
-                        <span className="c-consult-meta">
-                          {d}/{mo}/{y} · {fmtT(selectedAppointment.startH, selectedAppointment.startM)}–{fmtT(selectedAppointment.endH, selectedAppointment.endM)} · {selectedAppointment.type}
-                        </span>
+                      <h1 className="c-consult-title">Prontuário da consulta</h1>
+                      <div className="c-consult-sub">
+                        <PatientHeader
+                          layout="compact"
+                          title="Abrir ficha do paciente"
+                          onClick={() => {
+                            const pt = patients.find((x) => x.id === selectedAppointment.patientId);
+                            if (!pt) return;
+                            reset();
+                            setSelectedAppointment(null);
+                            setSelectedPatient(pt);
+                            setPatientTab("visao-geral");
+                            setSection("pacientes");
+                          }}
+                          name={selectedAppointment.patient}
+                        />
+                        <span className="c-consult-dot">·</span>
+                        <span>{d}/{mo}/{y}</span>
+                        <span className="c-consult-dot">·</span>
+                        <span>{fmtT(selectedAppointment.startH, selectedAppointment.startM)}–{fmtT(selectedAppointment.endH, selectedAppointment.endM)}</span>
+                        <Tag tone="accent">{selectedAppointment.type || "Consulta"}</Tag>
                       </div>
                     </div>
                   );
                 })()}
-                <div className="c-rec-btn-area">
-                  {status === "recording" ? (
-                    <button className="c-rec-btn c-rec-btn-active" onClick={stopRecording}>
-                      <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                        <rect x="4" y="4" width="16" height="16" rx="2"/>
-                      </svg>
-                      {mmss}
-                    </button>
-                  ) : (
-                    <button className="c-rec-btn" disabled={busy} onClick={startRecording}>
+                {!busy && <div className="c-rec-btn-area">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={startRecording}
+                    icon={
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="14" height="14">
-                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                        <line x1="12" y1="19" x2="12" y2="22"/>
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="22" />
                       </svg>
-                      {busy ? "Processando…" : "Gravar"}
-                    </button>
-                  )}
-                  <label className={`c-rec-upload${busy ? " c-disabled" : ""}`} title="Enviar arquivo de áudio">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                      <polyline points="17 8 12 3 7 8"/>
-                      <line x1="12" y1="3" x2="12" y2="15"/>
-                    </svg>
-                    <input type="file" accept="audio/*" onChange={onUploadFile} disabled={busy} />
-                  </label>
-                  <button
-                    className={`c-rec-upload${busy ? " c-disabled" : ""}${textOpen ? " c-rec-text-active" : ""}`}
-                    onClick={() => setTextOpen((v) => !v)}
-                    disabled={busy}
-                    title="Colar texto da transcrição"
+                    }
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" width="15" height="15">
-                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                      <polyline points="14 2 14 8 20 8"/>
-                      <line x1="8" y1="13" x2="16" y2="13"/>
-                      <line x1="8" y1="17" x2="16" y2="17"/>
+                    Gravar
+                  </Button>
+                  <input ref={audioFileRef} type="file" accept="audio/*" hidden onChange={onUploadFile} disabled={busy} />
+                  <IconButton outline label="Enviar arquivo de áudio" disabled={busy} onClick={() => audioFileRef.current?.click()}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
                     </svg>
-                  </button>
-                </div>
+                  </IconButton>
+                  <IconButton outline label="Colar texto da transcrição" active={textOpen} disabled={busy} onClick={() => setTextOpen((v) => !v)}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="8" y1="13" x2="16" y2="13" /><line x1="8" y1="17" x2="16" y2="17" />
+                    </svg>
+                  </IconButton>
+                </div>}
               </div>
 
-              {textOpen && status !== "recording" && (
-                <div className="c-text-input">
-                  <textarea
-                    className="c-text-input-area"
-                    rows={6}
-                    placeholder="Cole ou digite aqui a transcrição da consulta…"
-                    value={manualText}
-                    onChange={(e) => setManualText(e.target.value)}
-                    disabled={busy}
-                    autoFocus
-                  />
-                  <div className="c-text-input-actions">
-                    <button className="btn btn-outline btn-sm" onClick={() => { setTextOpen(false); setManualText(""); }} disabled={busy}>
-                      Cancelar
-                    </button>
-                    <button className="btn btn-solid btn-sm" onClick={handleManualSubmit} disabled={busy || !manualText.trim()}>
-                      Gerar prontuário
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {status === "recording" && (
-                <div className="c-rec-live">
-                  <div className="c-meter"><div className="c-meter-bar" style={{ width: `${level}%` }} /></div>
-                  {liveTranscript && <p className="c-live-text">{liveTranscript}</p>}
-                </div>
-              )}
-              {(status === "transcribing" || status === "processing") && (
-                <p className="c-rec-processing">
-                  {status === "transcribing" ? "Finalizando transcrição…" : "Estruturando prontuário…"}
-                </p>
-              )}
-              {status === "error" && <p className="c-status c-err">{error}</p>}
+              {status === "error" && prontuario && <p className="c-status c-err">{error}</p>}
 
               <section className="c-result">
-                {prontuario ? (
-                  <>
-                    <ProntuarioView
-                      prontuario={prontuario}
-                      transcript={transcript}
-                      onChange={handleProntuarioChange}
-                      onAprovar={handleAprovarProntuario}
-                    />
-                    {transcript && (
-                      <details className="c-transcript">
-                        <summary>Ver transcrição bruta</summary>
-                        <p>{transcript}</p>
-                      </details>
-                    )}
-                  </>
+                {status === "recording" ? (
+                  <ConsultaRecording time={mmss} level={level} text={liveTranscript} onStop={stopRecording} />
+                ) : status === "transcribing" || status === "processing" ? (
+                  <ConsultaWorking label={status === "transcribing" ? "Finalizando a transcrição…" : "Estruturando o prontuário…"} steps={status === "processing"} />
+                ) : prontuario ? (
+                  <ProntuarioView
+                    prontuario={prontuario}
+                    transcript={transcript}
+                    onChange={handleProntuarioChange}
+                    onAprovar={handleAprovarProntuario}
+                  />
+                ) : textOpen ? (
+                  <ConsultaPaste
+                    value={manualText}
+                    onChange={setManualText}
+                    onCancel={() => { setTextOpen(false); setManualText(""); }}
+                    onSubmit={handleManualSubmit}
+                  />
                 ) : (
-                  !busy && (
-                    <div className="c-prontuario-empty">
-                      <p>Grave, envie o áudio ou cole o texto da consulta para gerar o prontuário estruturado.</p>
-                    </div>
-                  )
+                  <ConsultaEmpty
+                    error={status === "error" ? error : ""}
+                    onRecord={startRecording}
+                    onUploadAudio={() => audioFileRef.current?.click()}
+                    onPasteText={() => setTextOpen(true)}
+                  />
                 )}
               </section>
             </>
           )}
 
           {section === "agenda" && (
-            <div className="c-agenda-wrap">
-              <div className="ag-toolbar">
-                <div className="ag-tabs">
-                  <button
-                    className={`ag-tab${agendaViewTab === "dia" ? " ag-tab-active" : ""}`}
-                    onClick={() => setAgendaViewTab("dia")}
-                  >Dia</button>
-                  <button
-                    className={`ag-tab${agendaViewTab === "semana" ? " ag-tab-active" : ""}`}
-                    onClick={() => setAgendaViewTab("semana")}
-                  >Semana</button>
-                </div>
-                <div className="ag-date-nav">
-                  <button className="ag-nav-btn" onClick={() => {
-                    const d = new Date(agendaDate);
-                    d.setDate(d.getDate() - (agendaViewTab === "semana" ? 7 : 1));
-                    setAgendaDate(d);
-                  }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                  </button>
-                  <div className="ag-date-label">
-                    <span>{agendaViewTab === "semana" ? fmtWeekRange(agendaDate) : fmtDate(agendaDate)}</span>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="3" y="4" width="18" height="18" rx="2"/>
-                      <line x1="16" y1="2" x2="16" y2="6"/>
-                      <line x1="8" y1="2" x2="8" y2="6"/>
-                      <line x1="3" y1="10" x2="21" y2="10"/>
-                    </svg>
-                  </div>
-                  <button className="ag-nav-btn" onClick={() => {
-                    const d = new Date(agendaDate);
-                    d.setDate(d.getDate() + (agendaViewTab === "semana" ? 7 : 1));
-                    setAgendaDate(d);
-                  }}>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                  </button>
-                </div>
-                <div className="ag-toolbar-right">
-                  <button className="btn btn-solid btn-sm" onClick={() => { setNcDate(toDateKey(agendaDate)); setNcOpen(true); }}>
-                    Nova consulta
-                  </button>
-                </div>
-              </div>
-
-              {agendaViewTab === "dia" && (
-                <div className="ag-grid-wrap" data-jasmin-context="agenda_dia">
-                  <div className="ag-header-row">
-                    <div className="ag-time-gutter" />
-                    <div className="ag-col-header">{fmtDate(agendaDate)}</div>
-                  </div>
-                  <div className="ag-body">
-                    <div className="ag-time-col">
-                      {AG_HOURS.map(h => (
-                        <div key={h} className="ag-time-cell">
-                          {String(h).padStart(2, "0")}:00
-                        </div>
-                      ))}
-                    </div>
-                    <div className="ag-cols">
-                      <div className="ag-col" style={{ height: AG_HOURS.length * AG_HOUR_H }}>
-                        {AG_HOURS.map((_, i) => (
-                          <div key={i} className="ag-hour-line" style={{ top: i * AG_HOUR_H }} />
-                        ))}
-                        {agendaAppointments.filter(a => a.date === toDateKey(agendaDate)).map(apt => {
-                          const top = (apt.startH - AG_START_H) * AG_HOUR_H + apt.startM * (AG_HOUR_H / 60);
-                          const height = ((apt.endH - apt.startH) * 60 + (apt.endM - apt.startM)) * (AG_HOUR_H / 60);
-                          const clrs = aptColors(apt.type);
-                          return (
-                            <div key={apt.id} className="ag-appointment"
-                              style={{ top, height, background: clrs.bg, borderColor: clrs.border, color: clrs.color }}
-                              onClick={() => openConsulta(apt, "agenda")}>
-                              <div className="ag-apt-name">{apt.patient}</div>
-                              <div className="ag-apt-info">{apt.type}</div>
-                              <div className="ag-apt-time">{fmtT(apt.startH, apt.startM)} – {fmtT(apt.endH, apt.endM)}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {agendaViewTab === "semana" && (() => {
-                const weekDays = getWeekDays(agendaDate);
-                const todayKey = toDateKey(new Date());
-                const selectedKey = toDateKey(agendaDate);
-                return (
-                  <div className="ag-grid-wrap">
-                    <div className="ag-header-row">
-                      <div className="ag-time-gutter" />
-                      {weekDays.map((day, i) => {
-                        const key = toDateKey(day);
-                        return (
-                          <div
-                            key={i}
-                            className={`ag-col-header ag-col-header-week${key === todayKey ? " ag-col-header-today" : ""}${key === selectedKey ? " ag-col-header-selected" : ""}`}
-                            onClick={() => { setAgendaDate(new Date(day)); setAgendaViewTab("dia"); }}
-                          >
-                            {fmtWeekDay(day)}
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <div className="ag-body">
-                      <div className="ag-time-col">
-                        {AG_HOURS.map(h => (
-                          <div key={h} className="ag-time-cell">
-                            {String(h).padStart(2, "0")}:00
-                          </div>
-                        ))}
-                      </div>
-                      <div className="ag-cols">
-                        {weekDays.map((day, dayIdx) => {
-                          const key = toDateKey(day);
-                          return (
-                            <div key={dayIdx} className="ag-col" style={{ height: AG_HOURS.length * AG_HOUR_H }}>
-                              {AG_HOURS.map((_, i) => (
-                                <div key={i} className="ag-hour-line" style={{ top: i * AG_HOUR_H }} />
-                              ))}
-                              {agendaAppointments.filter(a => a.date === key).map(apt => {
-                                const top = (apt.startH - AG_START_H) * AG_HOUR_H + apt.startM * (AG_HOUR_H / 60);
-                                const height = ((apt.endH - apt.startH) * 60 + (apt.endM - apt.startM)) * (AG_HOUR_H / 60);
-                                const clrs = aptColors(apt.type);
-                                return (
-                                  <div key={apt.id} className="ag-appointment"
-                                    style={{ top, height, background: clrs.bg, borderColor: clrs.border, color: clrs.color }}
-                                    onClick={() => openConsulta(apt, "agenda")}>
-                                    <div className="ag-apt-name">{apt.patient}</div>
-                                    <div className="ag-apt-info">{apt.type}</div>
-                                    <div className="ag-apt-time">{fmtT(apt.startH, apt.startM)} – {fmtT(apt.endH, apt.endM)}</div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
+            <Agenda
+              appointments={agendaAppointments}
+              patients={patients}
+              date={agendaDate}
+              view={agendaViewTab}
+              onDateChange={setAgendaDate}
+              onViewChange={setAgendaViewTab}
+              onChangeAppointments={setAgendaAppointments}
+              onOpenConsulta={(apt) => openConsulta(apt, "agenda")}
+              onOpenPatient={(id) => {
+                const pt = patients.find((x) => x.id === id);
+                if (pt) { setSelectedPatient(pt); setPatientTab("visao-geral"); setSection("pacientes"); }
+              }}
+              onDeleteConsulta={(apt) => setConfirmDelete({ kind: "consulta", apt })}
+              onMoreOptions={openNewConsulta}
+            />
           )}
 
           {section === "pacientes" && (
@@ -1276,8 +1159,8 @@ export default function ConsultaPage() {
                         </div>
                       </div>
                       <div className="p-modal-footer">
-                        <button type="button" className="btn btn-outline btn-sm" onClick={() => setNewPatientOpen(false)}>Cancelar</button>
-                        <button type="submit" className="btn btn-solid btn-sm">Salvar paciente</button>
+                        <Button type="button" variant="secondary" size="sm" onClick={() => setNewPatientOpen(false)}>Cancelar</Button>
+                        <Button type="submit" variant="primary" size="sm">Salvar paciente</Button>
                       </div>
                     </form>
                   </div>
@@ -1289,7 +1172,7 @@ export default function ConsultaPage() {
                   <div className="p-empty">
                     <h3 className="p-empty-title">Nenhum paciente cadastrado</h3>
                     <p className="p-empty-desc">Adicione o primeiro paciente para começar a gerenciar consultas e prontuários.</p>
-                    <button className="btn btn-solid btn-sm" onClick={() => setNewPatientOpen(true)}>Adicionar paciente</button>
+                    <Button variant="primary" size="sm" onClick={() => setNewPatientOpen(true)}>Adicionar paciente</Button>
                   </div>
                 ) : (
                   <>
@@ -1298,7 +1181,7 @@ export default function ConsultaPage() {
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
                         </svg>
-                        <input type="text" placeholder="Buscar paciente..." value={patientSearch} onChange={(e) => setPatientSearch(e.target.value)} />
+                        <input type="text" placeholder="Buscar por nome, CPF, telefone ou carteirinha…" value={patientSearch} onChange={(e) => setPatientSearch(e.target.value)} />
                       </div>
                       <div className="p-toolbar-right">
                         <div className="p-view-toggle">
@@ -1323,30 +1206,44 @@ export default function ConsultaPage() {
                             </svg>
                           </button>
                         </div>
-                        <button className="btn btn-solid btn-sm" onClick={() => setNewPatientOpen(true)}>
+                        <Button variant="primary" size="sm" onClick={() => setNewPatientOpen(true)}>
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                           </svg>
                           Novo paciente
-                        </button>
+                        </Button>
                       </div>
                     </div>
 
                     <div className="p-filters">
-                      {([
-                        { key: "todos", label: "Todos" },
-                        { key: "hoje", label: "Consulta hoje" },
-                        { key: "sem-prontuario", label: "Sem prontuário" },
-                        { key: "inativos", label: "Inativos" },
-                      ] as const).map((f) => (
+                      {PATIENT_VIEWS.map((f) => (
                         <button
                           key={f.key}
-                          className={`p-filter-pill${patientFilter === f.key ? " p-filter-pill-active" : ""}`}
+                          className={`p-filter-pill${patientFilter === f.key ? " p-filter-pill-active" : ""}${viewCounts[f.key] === 0 && patientFilter !== f.key ? " p-filter-pill-zero" : ""}`}
                           onClick={() => setPatientFilter(f.key)}
                         >
                           {f.label}
+                          <span className="p-filter-count">{viewCounts[f.key]}</span>
                         </button>
                       ))}
+                      <select
+                        className={`p-conv-select${patientConvenio !== "todos" ? " p-conv-select-on" : ""}`}
+                        value={patientConvenio}
+                        onChange={(e) => setPatientConvenio(e.target.value)}
+                        aria-label="Filtrar por convênio"
+                      >
+                        <option value="todos">Todos os convênios</option>
+                        {convenioOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      {(patientConvenio !== "todos" || patientFilter !== "todos" || patientSearch.trim()) && (
+                        <button
+                          type="button"
+                          className="p-filter-clear"
+                          onClick={() => { setPatientFilter("todos"); setPatientConvenio("todos"); setPatientSearch(""); }}
+                        >
+                          Limpar filtros
+                        </button>
+                      )}
                     </div>
 
                     <p className="p-result-count">
@@ -1365,8 +1262,16 @@ export default function ConsultaPage() {
                             ? "Todos os pacientes com consultas têm prontuário salvo. ✓"
                             : patientFilter === "inativos"
                             ? "Nenhum paciente inativo."
+                            : patientFilter === "a-faturar"
+                            ? "Nenhuma guia pendente de geração ou revisão. ✓"
+                            : patientFilter === "glosa"
+                            ? "Nenhuma guia glosada no momento. ✓"
+                            : patientFilter === "sem-retorno"
+                            ? "Todos os pacientes ativos têm retorno agendado. ✓"
                             : patientSearch.trim()
                             ? `Nenhum paciente encontrado para “${patientSearch.trim()}”.`
+                            : patientConvenio !== "todos"
+                            ? `Nenhum paciente do convênio ${patientConvenio}.`
                             : "Nenhum paciente encontrado."}
                         </p>
                       </div>
@@ -1384,17 +1289,16 @@ export default function ConsultaPage() {
                           const s = summaryOf(p.id);
                           const age = calcAge(p.dataNascimento);
                           const tone = proximaTone(s.proximaConsulta?.date ?? null);
-                          const col = avatarColor(`${p.nome}${p.sobrenome}`);
                           const sub = [age != null ? `${age} anos` : null, p.genero || null].filter(Boolean).join(" · ") || "—";
                           const proxLabel = tone === "today" ? "Hoje" : tone === "tomorrow" ? "Amanhã"
                             : s.proximaConsulta ? s.proximaConsulta.date.split("-").reverse().join("/") : "—";
                           return (
                             <button key={p.id} className="p-row" data-jasmin-context="paciente" data-patient-id={p.id} onClick={() => { setSelectedPatient(p); setPatientTab("visao-geral"); }}>
                               <span className="p-col-avatar">
-                                <span className="p-row-avatar" style={{ background: col.bg, color: col.fg }}>{initialsOf(p.nome, p.sobrenome)}</span>
+                                <Avatar name={`${p.nome} ${p.sobrenome}`} />
                               </span>
                               <span className="p-col-nome">
-                                <span className="p-row-name">{p.nome} {p.sobrenome}</span>
+                                <span className="p-row-name">{p.nome} {p.sobrenome}<PatientFlags ov={patientOverviews[p.id]} convenio={p.convenio} /></span>
                                 <span className="p-row-sub">{sub}</span>
                               </span>
                               <span className="p-col-prox">
@@ -1414,7 +1318,6 @@ export default function ConsultaPage() {
                           const s = summaryOf(p.id);
                           const age = calcAge(p.dataNascimento);
                           const tone = proximaTone(s.proximaConsulta?.date ?? null);
-                          const col = avatarColor(`${p.nome}${p.sobrenome}`);
                           const sub = [age != null ? `${age} anos` : null, p.genero || null].filter(Boolean).join(" · ") || "—";
                           const proxLabel = tone === "today" ? "Hoje" : tone === "tomorrow" ? "Amanhã"
                             : s.proximaConsulta ? s.proximaConsulta.date.split("-").reverse().join("/") : "—";
@@ -1422,11 +1325,11 @@ export default function ConsultaPage() {
                           return (
                             <button key={p.id} className="p-pcard" data-jasmin-context="paciente" data-patient-id={p.id} onClick={() => { setSelectedPatient(p); setPatientTab("visao-geral"); }}>
                               <div className="p-pcard-l1">
-                                <span className="p-row-avatar p-pcard-avatar" style={{ background: col.bg, color: col.fg }}>{initialsOf(p.nome, p.sobrenome)}</span>
+                                <Avatar name={`${p.nome} ${p.sobrenome}`} />
                                 <span className="p-pcard-name">{p.nome} {p.sobrenome}</span>
                                 <span className={`p-badge p-badge-${p.status}`}>{p.status === "ativo" ? "Ativo" : "Inativo"}</span>
                               </div>
-                              <div className="p-pcard-sub">{sub}</div>
+                              <div className="p-pcard-sub">{sub}<PatientFlags ov={patientOverviews[p.id]} convenio={p.convenio} /></div>
                               <div className="p-pcard-divider" />
                               <div className={`p-pcard-block${tone === "today" ? " p-pcard-block-today" : ""}`}>
                                 <span className="p-pcard-flabel">Próxima consulta</span>
@@ -1462,57 +1365,46 @@ export default function ConsultaPage() {
                     </button>
 
                     <div className="p-patient-identity">
-                      <div className="p-avatar-lg">
-                        {selectedPatient.nome[0]}{selectedPatient.sobrenome[0]}
-                      </div>
-                      <h2 className="p-patient-name">{selectedPatient.nome} {selectedPatient.sobrenome}</h2>
-                      <p className="p-patient-meta">
-                        {fmtBirthDate(selectedPatient.dataNascimento)}{selectedPatient.genero ? ` · ${selectedPatient.genero}` : ""}
-                      </p>
-                      {selectedPatient.telefone && (
-                        <p className="p-patient-meta">{selectedPatient.telefone}</p>
-                      )}
-                      <span className={`p-badge p-badge-${selectedPatient.status}`}>
-                        {selectedPatient.status === "ativo" ? "Ativo" : "Inativo"}
-                      </span>
+                      <PatientHeader
+                        layout="stack"
+                        name={`${selectedPatient.nome} ${selectedPatient.sobrenome}`}
+                        lines={[
+                          `${fmtBirthDate(selectedPatient.dataNascimento)}${selectedPatient.genero ? ` · ${selectedPatient.genero}` : ""}`,
+                          selectedPatient.telefone,
+                        ]}
+                        badge={<Status tone={selectedPatient.status === "ativo" ? "green" : "neutral"}>{selectedPatient.status === "ativo" ? "Ativo" : "Inativo"}</Status>}
+                      />
                     </div>
 
                     {(() => {
-                      const todayKey = toDateKey(new Date());
-                      const nextApt = agendaAppointments
-                        .filter(a => a.patientId === selectedPatient.id && a.date >= todayKey)
-                        .sort((a, b) => a.date.localeCompare(b.date) || a.startH - b.startH || a.startM - b.startM)[0] ?? null;
-                      const [ny, nmo, nd] = nextApt ? nextApt.date.split("-") : [];
+                      const ov = patientOverviews[selectedPatient.id];
+                      const temAlerta = !!ov && (ov.alergias.length > 0 || !!ov.comorbidades.trim() || ov.medicamentos.length > 0 || ov.alertasClinicos.length > 0);
                       return (
-                        <div className="p-info-block">
-                          <p className="p-info-block-title">Próxima Consulta</p>
-                          {nextApt ? (
-                            <button className="p-next-consult-btn"
-                              onClick={() => openConsulta(nextApt, "paciente")}>
-                              <span className="p-next-consult-date">{nd}/{nmo}/{ny}</span>
-                              <span className="p-next-consult-time">{fmtT(nextApt.startH, nextApt.startM)} · {nextApt.type}</span>
-                            </button>
-                          ) : (
-                            <p className="p-info-value">—</p>
+                        <>
+                          {temAlerta && ov && (
+                            <div className="p-alertbox">
+                              <p className="p-alertbox-title">Alertas clínicos</p>
+                              <div className="p-side-chips">
+                                {ov.alergias.map((a) => <span key={a} className="p-side-chip p-side-chip-red">Alergia: {a}</span>)}
+                                {ov.comorbidades.trim() && <span className="p-side-chip p-side-chip-amber">{ov.comorbidades}</span>}
+                                {ov.medicamentos.map((m) => <span key={m} className="p-side-chip p-side-chip-blue">Em uso: {m}</span>)}
+                                {ov.alertasClinicos.map((t) => <span key={t} className="p-side-chip p-side-chip-amber">{t}</span>)}
+                              </div>
+                            </div>
                           )}
-                        </div>
+
+                          {selectedPatient.convenio && (
+                            <div className="p-info-block">
+                              <p className="p-info-block-title">Plano de Saúde</p>
+                              <div className="p-side-lines">
+                                <span className="p-side-line"><b>{selectedPatient.convenio}</b>{selectedPatient.plano ? ` · ${selectedPatient.plano}` : ""}</span>
+                                {selectedPatient.carteirinha && <span className="p-side-line p-side-mono">{selectedPatient.carteirinha}</span>}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       );
                     })()}
-
-                    <div className="p-info-block">
-                      <p className="p-info-block-title">Alertas</p>
-                      <p className="p-info-value">—</p>
-                    </div>
-
-                    <div className="p-info-block">
-                      <p className="p-info-block-title">Financeiro</p>
-                      <p className="p-info-value">—</p>
-                    </div>
-
-                    <div className="p-info-block">
-                      <p className="p-info-block-title">Plano de Saúde</p>
-                      <p className="p-info-value">—</p>
-                    </div>
 
                     <button className="p-delete-patient-btn"
                       onClick={() => setConfirmDelete({ kind: "patient", patient: selectedPatient })}>
@@ -1527,29 +1419,40 @@ export default function ConsultaPage() {
 
                   {/* Conteúdo principal com abas */}
                   <div className="p-content">
-                    <nav className="p-tab-nav">
-                      {/* P2 — "imagens" para implementar futuramente */}
-                      {(["visao-geral", "ficha-clinica", "odontograma", "consultas", "cobrancas"] as const).map((t) => {
-                        const labels: Record<string, string> = {
-                          "visao-geral": "Visão Geral",
-                          "ficha-clinica": "Ficha clínica",
-                          "odontograma": "Odontograma",
-                          "consultas": "Consultas",
-                          "cobrancas": "Cobranças",
-                        };
-                        return (
-                          <button key={t} className={`p-tab${patientTab === t ? " p-tab-active" : ""}`} onClick={() => setPatientTab(t)}>
-                            {labels[t]}
-                          </button>
-                        );
-                      })}
-                    </nav>
+                    <div className="p-tabs-wrap">
+                      <Tabs
+                        aria-label="Seções do paciente"
+                        items={[
+                          { id: "visao-geral", label: "Visão Geral" },
+                          { id: "ficha-clinica", label: "Ficha clínica" },
+                          { id: "odontograma", label: "Odontograma" },
+                          { id: "consultas", label: "Consultas" },
+                          { id: "cobrancas", label: "Cobranças" },
+                        ]}
+                        value={patientTab}
+                        onChange={(id) => setPatientTab(id as typeof patientTab)}
+                      />
+                    </div>
 
                     <div className="p-tab-content">
                       {patientTab === "visao-geral" && (
                         <>
+                          {patientOverviews[selectedPatient.id] && (
+                            <PatientOverviewView
+                              patient={selectedPatient}
+                              data={patientOverviews[selectedPatient.id]}
+                              onOpenConsulta={(apt) => openConsulta(apt, "paciente")}
+                              onNewAppointment={() => {
+                                const d = new Date();
+                                d.setDate(d.getDate() + 1);
+                                if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+                                openNewConsulta({ dateKey: toDateKey(d), startMin: 9 * 60, endMin: 10 * 60, patient: selectedPatient, type: "Retorno" });
+                              }}
+                              onGoTab={setPatientTab}
+                            />
+                          )}
                           <div className="p-fields-section">
-                            <h3 className="p-fields-section-title">Dados Pessoais</h3>
+                            <SectionTitle>Dados Pessoais</SectionTitle>
                             <div className="p-fields-grid">
                               <div className="p-field">
                                 <span className="p-field-label">Nome</span>
@@ -1643,7 +1546,7 @@ export default function ConsultaPage() {
                           </div>
 
                           <div className="p-fields-section">
-                            <h3 className="p-fields-section-title">Informações de Contato</h3>
+                            <SectionTitle>Informações de Contato</SectionTitle>
                             <div className="p-fields-grid">
                               <div className="p-field">
                                 <span className="p-field-label">Celular</span>
@@ -1702,6 +1605,8 @@ export default function ConsultaPage() {
                             <p>Nenhuma consulta agendada.</p>
                           </div>
                         ) : (
+                          <section className="p-fields-section">
+                          <SectionTitle>Consultas</SectionTitle>
                           <div className="p-consult-list">
                             {apts.map(apt => {
                               const [y, mo, d] = apt.date.split("-");
@@ -1719,7 +1624,7 @@ export default function ConsultaPage() {
                                     <div className="p-consult-badges">
                                       <span className={`p-consult-type-badge ${consultTypeClass(apt.type)}`}>{apt.type || "Consulta"}</span>
                                       <span className={`p-consult-status-badge ${temProntuario ? "p-consult-status-saved" : "p-consult-status-none"}`}>
-                                        {temProntuario ? "Prontuário salvo" : "Sem prontuário"}
+                                        {temProntuario ? "Prontuário salvo" : isFuture ? "Agendada" : "Sem prontuário"}
                                       </span>
                                     </div>
                                     <svg className="p-consult-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1738,6 +1643,7 @@ export default function ConsultaPage() {
                               );
                             })}
                           </div>
+                          </section>
                         );
                       })()}
 
@@ -1746,9 +1652,10 @@ export default function ConsultaPage() {
                       )}
 
                       {patientTab === "odontograma" && (
-                        <div data-jasmin-context="odontograma" data-patient-id={selectedPatient.id}>
+                        <section className="p-fields-section" data-jasmin-context="odontograma" data-patient-id={selectedPatient.id}>
+                          <SectionTitle>Odontograma</SectionTitle>
                           <Odontograma patientId={selectedPatient.id} />
-                        </div>
+                        </section>
                       )}
 
                       {patientTab === "cobrancas" && (
@@ -1831,7 +1738,7 @@ export default function ConsultaPage() {
                         <button key={p.id} type="button" className="nc-patient-opt"
                           onMouseDown={() => { setNcPatient(p); setNcSearch(`${p.nome} ${p.sobrenome}`); setNcSearchOpen(false); }}
                         >
-                          <div className="p-avatar-sm">{p.nome[0]}{p.sobrenome[0]}</div>
+                          <Avatar name={`${p.nome} ${p.sobrenome}`} size="sm" />
                           <div>
                             <div className="nc-opt-name">{p.nome} {p.sobrenome}</div>
                             {p.dataNascimento && <div className="nc-opt-meta">{fmtBirthDate(p.dataNascimento)}</div>}
@@ -1889,8 +1796,8 @@ export default function ConsultaPage() {
               </div>
             </div>
             <div className="nc-footer">
-              <button type="button" className="btn btn-outline btn-sm" onClick={() => setNcOpen(false)}>Cancelar</button>
-              <button type="submit" className="btn btn-solid btn-sm" disabled={!ncPatient || !ncDate}>Agendar</button>
+              <Button type="button" variant="secondary" size="sm" onClick={() => setNcOpen(false)}>Cancelar</Button>
+              <Button type="submit" variant="primary" size="sm" disabled={!ncPatient || !ncDate}>Agendar</Button>
             </div>
           </form>
         </div>
@@ -1928,13 +1835,71 @@ export default function ConsultaPage() {
                 )}
               </p>
               <div className="p-confirm-actions">
-                <button className="btn btn-outline btn-sm" onClick={() => setConfirmDelete(null)}>Cancelar</button>
-                <button className="btn btn-danger btn-sm" onClick={handleConfirmDelete}>Excluir</button>
+                <Button variant="secondary" size="sm" onClick={() => setConfirmDelete(null)}>Cancelar</Button>
+                <Button variant="danger" size="sm" onClick={handleConfirmDelete}>Excluir</Button>
               </div>
             </div>
           </div>
         );
       })()}
+
+      {demoOpen && (
+        <div className="p-modal-overlay" onClick={() => setDemoOpen(false)}>
+          <div className="p-confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="p-confirm-icon" style={{ background: "rgba(252,94,14,0.1)", color: "#fc5e0e" }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/>
+              </svg>
+            </div>
+            <h2 className="p-confirm-title">Modo Demo</h2>
+            <div className="dm-opts" role="radiogroup" aria-label="Tipo de demonstração">
+              {(Object.keys(DEMO_MODES) as DemoMode[]).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  role="radio"
+                  aria-checked={demoMode === m}
+                  className={`dm-opt${demoMode === m ? " dm-opt-on" : ""}`}
+                  onClick={() => setDemoMode(m)}
+                >
+                  <span className="dm-opt-radio" />
+                  <span className="dm-opt-body">
+                    <span className="dm-opt-title">{DEMO_MODES[m].label}</span>
+                    <span className="dm-opt-sub">{DEMO_MODES[m].resumo}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <label className="dm-date">
+              <span>
+                <b>Dia da apresentação</b>
+                <small>vira o &ldquo;hoje&rdquo; da demo: as consultas desse dia ficam por fazer, prontas para gravar ao vivo</small>
+              </span>
+              <input type="date" value={demoRef} min={toDateKey(new Date())} onChange={(e) => e.target.value && setDemoRef(e.target.value)} />
+            </label>
+            <p className="p-confirm-text" style={{ marginTop: 16 }}>
+              <strong>Atenção:</strong> isso substitui todos os dados locais atuais deste navegador.
+            </p>
+            <div className="p-confirm-actions" style={{ flexWrap: "wrap" }}>
+              <Button variant="secondary" size="sm" onClick={() => setDemoOpen(false)}>Cancelar</Button>
+              {demoActive && (
+                <Button
+                  variant="secondary" size="sm"
+                  onClick={() => { clearAllLocalData(); window.location.reload(); }}
+                >
+                  Limpar tudo
+                </Button>
+              )}
+              <Button
+                variant="primary" size="sm"
+                onClick={() => { loadDemoData(demoMode, demoRef); window.location.reload(); }}
+              >
+                {demoActive ? "Recarregar dados demo" : "Carregar dados demo"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 

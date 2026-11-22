@@ -70,7 +70,11 @@ export interface PlanoModel {
    * Ex.: ["abertura coronária", "preparo QM", "pasta hidróxido cálcio", "Coltosol"].
    */
   procedimentos_realizados: string[];
-  /** O que deve ir para a guia de cobrança — consolidado pelo LLM via tabela TUSS. */
+  /**
+   * O que deve ir para a guia de cobrança. Prontuários NOVOS saem do pipeline com
+   * [] — a consolidação clínica → TUSS acontece no agente de cobrança, ao gerar a
+   * guia. Prontuários antigos (e os de demonstração) podem trazê-la preenchida.
+   */
   procedimentos_faturaveis: ProcedimentoFaturavel[];
   /**
    * @deprecated Campo legado (prontuários gerados antes da consolidação faturável).

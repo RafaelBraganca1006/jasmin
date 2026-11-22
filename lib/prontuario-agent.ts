@@ -1,10 +1,9 @@
-import { groq, MODELS } from "@/lib/groq";
+import { groq, MODELS, llmParams } from "@/lib/groq";
 import type {
   AnamneseModel,
   ExameModel,
   DiagnosticoModel,
   PlanoModel,
-  ProcedimentoFaturavel,
   AlertasModel,
   DenteModel,
   IdentificacaoModel,
@@ -13,11 +12,10 @@ import type {
   EvidenciasProntuario,
   PassoResult,
 } from "@/lib/types-prontuario";
-import { buildTussContextString, isKnownTussCode } from "@/lib/tuss-context";
 
 /**
  * Pipeline sequencial de 5 passos (Camada 2).
- * Cada passo é uma chamada Groq llama-3.3-70b em JSON mode, com system prompt
+ * Cada passo é uma chamada Groq (MODELS.structuring) em JSON mode, com system prompt
  * especializado. O output de cada passo alimenta o próximo. Falhas são isoladas:
  * se um passo quebra, ele devolve um default vazio + erro, e o pipeline segue.
  */
@@ -40,7 +38,12 @@ export interface GerarProntuarioOutput {
 // Helpers de normalização
 // ─────────────────────────────────────────────────────────────────────────────
 
-const str = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
+// O modelo às vezes devolve campos de texto como lista (["a", "b"]) — junta em vez de descartar.
+const str = (v: unknown): string => {
+  if (typeof v === "string") return v.trim();
+  if (Array.isArray(v)) return v.map((x) => (typeof x === "string" ? x.trim() : "")).filter(Boolean).join("; ");
+  return "";
+};
 const optStr = (v: unknown): string | undefined => {
   const s = str(v);
   return s ? s : undefined;
@@ -75,6 +78,7 @@ async function runStep<T>(
   try {
     const completion = await groq.chat.completions.create({
       model: MODELS.structuring,
+      ...llmParams(),
       temperature: 0.2,
       response_format: { type: "json_object" },
       messages: [
@@ -242,85 +246,35 @@ function parseDiagnostico(raw: Record<string, unknown>): { model: DiagnosticoMod
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PASSO 4 — Plano de tratamento e evolução
+// PASSO 4 — Plano de tratamento e evolução (documentação clínica apenas)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Montado UMA vez no load do módulo: a tabela TUSS é constante (lib/tuss-data.ts).
-const SYS_PLANO = `Você é especialista em faturamento odontológico brasileiro com profundo conhecimento da tabela TUSS e das regras de cobrança de convênios de saúde. Recebe a TRANSCRIÇÃO e os outputs do EXAME e do DIAGNÓSTICO.
+// A consolidação clínica → TUSS faturável NÃO acontece mais aqui: ela foi movida
+// para o agente de cobrança (lib/cobranca-agent.ts, aba Cobranças → "Gerar guia").
+// Assim este prompt fica pequeno (sem a tabela TUSS de ~8k tokens) e o prontuário
+// não depende de conhecimento de faturamento.
+const SYS_PLANO = `Você é um assistente de documentação clínica odontológica (Brasil). Recebe a TRANSCRIÇÃO e os outputs do EXAME e do DIAGNÓSTICO.
 
-Sua tarefa tem DUAS partes.
-
-PARTE A — Documentação clínica (campos do prontuário):
-Extraia da transcrição TUDO que foi realizado clinicamente, sem omitir nada.
-- procedimentos_realizados: array das etapas/procedimentos efetivamente feitos, em linguagem CLÍNICA técnica, capturados da transcrição sem consolidar (ex.: ["abertura coronária", "preparo químico-mecânico", "pasta de hidróxido de cálcio", "fechamento provisório com Coltosol"]). NÃO pode ser vazio se algo foi feito.
+Extraia da transcrição TUDO que foi realizado clinicamente, sem omitir nada:
+- procedimentos_realizados: array das etapas/procedimentos efetivamente feitos, em linguagem CLÍNICA técnica, capturados da transcrição sem consolidar (ex.: ["abertura coronária", "preparo químico-mecânico", "pasta de hidróxido de cálcio", "fechamento provisório com Coltosol"]). Inclua exames realizados na consulta (ex.: "radiografia periapical"). NÃO pode ser vazio se algo foi feito.
 - materiais: materiais usados (ex.: "resina composta, ácido fosfórico") ou "".
 - anestesia: tipo + quantidade + elemento (ex.: "lidocaína 2% com vaso, 1 tubete, bloqueio do 46") ou "".
 - pos_operatorio: orientações pós-operatórias ou "".
 - proxima_consulta: o que ficou agendado/planejado ou "".
 
-ESTILO (procedimentos_realizados, materiais, anestesia, pos_operatorio, proxima_consulta): português clínico e profissional, terceira pessoa impessoal, inicial maiúscula. NÃO copie a fala coloquial — traduza para registro técnico.
-
-PARTE B — Consolidação para faturamento (procedimentos_faturaveis):
-Com base na TABELA TUSS abaixo, identifique os procedimentos FATURÁVEIS ao convênio.
-
-TABELA TUSS ODONTOLÓGICA VIGENTE (formato: codigo | descricao | inclui: etapas já incluídas no código):
-${buildTussContextString()}
-
-REGRAS DE CONSOLIDAÇÃO — leia com atenção:
-1. Etapas técnicas de um procedimento NÃO são cobradas separadamente. Abertura coronária, localização de canais, preparo químico-mecânico e instrumentação são etapas do tratamento endodôntico — não itens separados na guia.
-2. Para endodontia, escolha o código por número de raízes do dente:
-   - Anteriores (11-13, 21-23, 31-33, 41-43): geralmente unirradicular.
-   - Pré-molares (14, 15, 24, 25, 34, 35, 44, 45): geralmente birradicular.
-   - Molares (16, 17, 18, 26, 27, 28, 36, 37, 38, 46, 47, 48): geralmente multirradicular (3+ raízes).
-3. Curativo de demora é faturável SEPARADO do canal APENAS quando a obturação não foi concluída na mesma sessão. Se a sessão concluiu o canal, cobre o canal completo; se foi só curativo, cobre o curativo.
-4. Raio-x periapical É faturável separadamente quando realizado na consulta.
-5. Anestesia NÃO é faturável separadamente — está inclusa no procedimento principal.
-6. Se não encontrar código TUSS correspondente com confiança, use codigo_tuss: "MANUAL" e requer_revisao: true. NUNCA invente um código.
-7. Para cada procedimento faturável, liste em inclui_etapas quais itens de procedimentos_realizados foram consolidados nele.
-
-Cada item de procedimentos_faturaveis é um objeto:
-{ "codigo_tuss": "<código da tabela ou MANUAL>", "descricao": "<descrição oficial da tabela>", "elemento_dental": "<FDI ou ''>", "quantidade": <number>, "inclui_etapas": ["<etapa de procedimentos_realizados>"], "requer_revisao": <boolean>, "justificativa": "<por que esse código>" }
+ESTILO: português clínico e profissional, terceira pessoa impessoal, inicial maiúscula. NÃO copie a fala coloquial — traduza para registro técnico.
 
 EVIDÊNCIAS (campo "evidencias", e SOMENTE ele): objeto com chaves entre (procedimentos_realizados, materiais, anestesia, pos_operatorio, proxima_consulta). Cada valor é um array (até 3) de fragmentos COPIADOS PALAVRA POR PALAVRA da TRANSCRIÇÃO do diálogo — com a grafia original. A cópia literal vale SÓ aqui. NUNCA copie do Exame/Diagnóstico nem invente; se não houver trecho literal, use [].
 
-Responda SOMENTE com JSON válido com as chaves: procedimentos_realizados, procedimentos_faturaveis, materiais, anestesia, pos_operatorio, proxima_consulta, evidencias.`;
+Responda SOMENTE com JSON válido com as chaves: procedimentos_realizados, materiais, anestesia, pos_operatorio, proxima_consulta, evidencias.`;
 
 const PLANO_EV_KEYS = ["procedimentos_realizados", "materiais", "anestesia", "pos_operatorio", "proxima_consulta"];
-
-function parseFaturaveis(v: unknown): ProcedimentoFaturavel[] {
-  if (!Array.isArray(v)) return [];
-  const out: ProcedimentoFaturavel[] = [];
-  for (const item of v) {
-    if (!item || typeof item !== "object") continue;
-    const o = item as Record<string, unknown>;
-    const codigo_tuss = str(o.codigo_tuss).toUpperCase();
-    const descricao = str(o.descricao);
-    if (!codigo_tuss && !descricao) continue;
-
-    // Defensivo: se o LLM devolveu um código que não existe na tabela vigente,
-    // força revisão humana (não confiar em código alucinado).
-    const isManual = codigo_tuss === "MANUAL" || !codigo_tuss;
-    const requerRevisao =
-      bool(o.requer_revisao) || isManual || !isKnownTussCode(codigo_tuss);
-
-    const q = Number(o.quantidade);
-    out.push({
-      codigo_tuss: isManual ? "MANUAL" : codigo_tuss,
-      descricao,
-      elemento_dental: str(o.elemento_dental),
-      quantidade: Number.isFinite(q) && q > 0 ? q : 1,
-      inclui_etapas: arr(o.inclui_etapas),
-      requer_revisao: requerRevisao,
-      justificativa: str(o.justificativa),
-    });
-  }
-  return out;
-}
 
 function parsePlano(raw: Record<string, unknown>): { model: PlanoModel; ev: EvidenciasProntuario } {
   const model: PlanoModel = {
     procedimentos_realizados: arr(raw.procedimentos_realizados),
-    procedimentos_faturaveis: parseFaturaveis(raw.procedimentos_faturaveis),
+    // Preenchido depois, pelo agente de cobrança, ao gerar a guia.
+    procedimentos_faturaveis: [],
     materiais: optStr(raw.materiais),
     anestesia: optStr(raw.anestesia),
     pos_operatorio: optStr(raw.pos_operatorio),
@@ -340,6 +294,9 @@ Detecte e reporte SOMENTE o que for concreto e verificável a partir dos dados:
 - alertas_clinicos: riscos clínicos reais (ex.: "Paciente em uso de anticoagulante com procedimento cirúrgico planejado", "Alergia a anestésico não confirmada antes de anestesia").
 - inconsistencias: contradições entre seções (ex.: "Procedimento de restauração sem diagnóstico de cárie correspondente").
 - requer_confirmacao: true SOMENTE se houver pelo menos um gap, alerta ou inconsistência que exija revisão humana antes de aprovar; senão false.
+
+IGNORE faturamento: códigos TUSS e procedimentos faturáveis são preenchidos depois, pelo agente de cobrança — nunca reporte a ausência deles.
+LINGUAGEM: escreva cada item em português claro para o dentista. NUNCA cite nomes técnicos de campos/chaves JSON (ex.: escreva "raio-x não registrado", não "confirmado_por_raio_x").
 
 REGRA CRÍTICA: NÃO invente alertas para parecer útil. Se o prontuário está completo e coerente, retorne arrays VAZIOS e requer_confirmacao=false. Nada de avisos genéricos, vagos ou óbvios. Cada item deve apontar algo específico e acionável.
 
@@ -382,14 +339,18 @@ function buildMetadata(
 ): MetadataCobranca {
   // Uma radiografia faturável é prova de que o raio-x foi realizado — evita
   // falso alerta documental ("anexe a radiografia") quando ela já está na guia.
-  const radiografias = (plano.procedimentos_faturaveis ?? []).filter((f) =>
-    /radiograf|periapical|raio.?x|interproximal|panor/i.test(f.descricao)
-  );
+  const RX = /radiograf|periapical|raio.?x|interproximal|panor/i;
+  const radiografias = [
+    ...(plano.procedimentos_faturaveis ?? []).filter((f) => RX.test(f.descricao)).map((f) => f.descricao),
+    ...(plano.procedimentos_realizados ?? []).filter((p) => RX.test(p)),
+  ];
   const raioX =
     Boolean(exame.laudo_radiologico) ||
     diagnostico.confirmado_por_raio_x ||
     radiografias.length > 0;
-  const inicialFinal = radiografias.some((f) => f.quantidade >= 2) || radiografias.length >= 2;
+  const inicialFinal =
+    radiografias.length >= 2 ||
+    (plano.procedimentos_faturaveis ?? []).some((f) => RX.test(f.descricao) && f.quantidade >= 2);
   return {
     convenio_nome: ident.convenio || undefined,
     carteirinha: ident.carteirinha || undefined,
@@ -462,7 +423,7 @@ export async function gerarProntuario(input: GerarProntuarioInput): Promise<Gera
   const diagnostico = s3.data.model;
   if (s3.data.aviso) falhas.push(s3.data.aviso);
 
-  // Passo 4 — Plano, evolução e consolidação faturável
+  // Passo 4 — Plano e evolução (sem consolidação TUSS)
   const elementoFat = diagnostico.elemento_dental || "";
   const s4 = await runStep(
     "Plano", SYS_PLANO,
@@ -482,7 +443,7 @@ export async function gerarProntuario(input: GerarProntuarioInput): Promise<Gera
     : "";
   const s5 = await runStep(
     "Revisor", SYS_ALERTAS,
-    `Prontuário a revisar:\n\nAnamnese:\n${JSON.stringify(anamnese, null, 2)}\n\nExame:\n${JSON.stringify(exame, null, 2)}\n\nDiagnóstico:\n${JSON.stringify(diagnostico, null, 2)}\n\nPlano:\n${JSON.stringify(plano, null, 2)}${historicoTxt}`,
+    `Prontuário a revisar:\n\nAnamnese:\n${JSON.stringify(anamnese, null, 2)}\n\nExame:\n${JSON.stringify(exame, null, 2)}\n\nDiagnóstico:\n${JSON.stringify(diagnostico, null, 2)}\n\nPlano:\n${JSON.stringify({ ...plano, procedimentos_faturaveis: undefined }, null, 2)}${historicoTxt}`,
     parseAlertas, EMPTY_ALERTAS
   );
   if (!s5.ok && s5.erro) falhas.push(s5.erro);

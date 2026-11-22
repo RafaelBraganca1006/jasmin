@@ -84,7 +84,7 @@ export function createJasminGraph({ snapshot }: CreateGraphInput) {
   const tools = createTools(snapshot);
 
   const model = new ChatGroq({
-    model: MODELS.structuring, // llama-3.3-70b-versatile
+    model: MODELS.structuring,
     temperature: 0.3,
     apiKey: process.env.GROQ_API_KEY,
   });

@@ -309,14 +309,17 @@ function summarizeOne(
   const today = todayKey();
   const mine = appts.filter((a) => a.patientId === patientId);
 
-  const futuras = mine.filter((a) => a.date >= today).sort(byDateAsc);
-  const passadas = mine.filter((a) => a.date < today).sort(byDateDesc);
+  // Consulta com prontuário salvo já foi realizada (mesmo que a data ainda não tenha chegado, como na demo).
+  const feita = (a: ApptRow) => a.date < today || Boolean(jsonMap[k(a.id)]);
+  const futuras = mine.filter((a) => !feita(a)).sort(byDateAsc);
+  const passadas = mine.filter(feita).sort(byDateDesc);
   const comProntuario = mine.filter((a) => jsonMap[k(a.id)]).sort(byDateDesc);
 
   let ultimoProcedimento = "";
   if (comProntuario.length) {
     const procs = procedimentosRealizados(jsonMap[k(comProntuario[0].id)].plano);
-    ultimoProcedimento = procs[0] ?? "";
+    // Prefere o procedimento principal (pula exame/radiografia/anestesia, que são etapas de apoio).
+    ultimoProcedimento = procs.find((x) => !/radiograf|raio.?x|anestesi|exame cl/i.test(x)) ?? procs[0] ?? "";
   }
 
   return {

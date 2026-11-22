@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { createJasminGraph, buildSystemPrompt } from "@/lib/jasmin-graph";
-import { groq, MODELS } from "@/lib/groq";
+import { groq, MODELS, llmParams } from "@/lib/groq";
 import type { StorageSnapshot } from "@/lib/chat-snapshot";
 import type { ChatMessage, JasminChip } from "@/lib/chat-context";
 
@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
         let txt = "";
         const completion = await groq.chat.completions.create({
           model: MODELS.structuring,
+          ...llmParams(),
           temperature: 0.1,
           stream: true,
           messages: gmsgs,

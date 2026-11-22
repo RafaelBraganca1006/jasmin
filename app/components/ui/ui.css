@@ -1,0 +1,161 @@
+/* ============================================================================
+   Kit de componentes do Jasmin (prefixo ui-)
+   Visual: plano, linhas finas, cantos quase retos; laranja só em destaque
+   (títulos de seção, aba ativa, ação principal, links de ação).
+   ============================================================================ */
+
+:root {
+  --ui-radius: 4px;
+  --ui-btn-radius: 999px; /* botões são arredondados em todo o app */
+  --ui-line: rgba(27, 23, 20, 0.1);
+  --ui-line-strong: rgba(27, 23, 20, 0.2);
+  --ui-accent: #fc5e0e;
+  --ui-accent-dark: #e2540b;
+}
+
+/* ── Botões ─────────────────────────────────────────────────────────────── */
+.ui-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: inherit; font-weight: 600; line-height: 1.2; white-space: nowrap; cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--ui-btn-radius);
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.ui-btn-md { padding: 9px 20px; font-size: 14px; }
+.ui-btn-sm { padding: 7px 16px; font-size: 13px; }
+.ui-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.ui-btn-primary { background: var(--ui-accent); color: #fff; }
+.ui-btn-primary:not(:disabled):hover { background: var(--ui-accent-dark); }
+.ui-btn-secondary { background: #fff; color: var(--ink); border-color: var(--ui-line-strong); }
+.ui-btn-secondary:not(:disabled):hover { background: rgba(27, 23, 20, 0.04); }
+.ui-btn-ghost { background: transparent; color: var(--ink-soft); }
+.ui-btn-ghost:not(:disabled):hover { background: rgba(27, 23, 20, 0.06); color: var(--ink); }
+.ui-btn-danger { background: #fff; color: #b3261e; border-color: #e9a8a2; }
+.ui-btn-danger:not(:disabled):hover { background: #fdecec; }
+
+.ui-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0;
+  border: none; border-radius: 50%; background: transparent; color: var(--ink-soft); cursor: pointer;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.ui-iconbtn-outline { width: 34px; height: 34px; border: 1px solid var(--ui-line-strong); background: #fff; }
+.ui-iconbtn:hover, .ui-iconbtn-on { background: rgba(27, 23, 20, 0.07); color: var(--ink); }
+.ui-iconbtn:disabled { opacity: 0.5; cursor: progress; }
+.ui-iconbtn svg { width: 17px; height: 17px; }
+
+.ui-textbtn {
+  padding: 0; border: none; background: none; font-family: inherit; font-size: inherit; font-weight: 500; cursor: pointer;
+  color: var(--ink-soft); text-decoration: underline dotted; text-underline-offset: 3px;
+}
+.ui-textbtn:hover { color: var(--ink); }
+/* pílula laranja clara (única forma arredondada do kit: usada para "N fontes") */
+.ui-textbtn-accent {
+  display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; background: rgba(252, 94, 14, 0.08);
+  color: var(--ui-accent); font-size: 11px; font-weight: 600; text-decoration: none; transition: background 0.14s ease;
+}
+.ui-textbtn-accent:hover { background: rgba(252, 94, 14, 0.16); color: var(--ui-accent); }
+.ui-textbtn-accent.ui-on { background: rgba(252, 94, 14, 0.16); }
+.ui-textbtn-link { color: var(--ui-accent); font-size: 13px; font-weight: 600; text-decoration: none; }
+.ui-textbtn-link:hover { color: var(--ui-accent-dark); text-decoration: underline; }
+
+/* ── Abas ───────────────────────────────────────────────────────────────── */
+.ui-tabs { display: flex; align-items: stretch; gap: 2px; border-bottom: 1px solid var(--ui-line); overflow-x: auto; scrollbar-width: none; }
+.ui-tabs::-webkit-scrollbar { display: none; }
+.ui-tab {
+  display: inline-flex; align-items: center; gap: 6px; padding: 12px 14px; margin-bottom: -1px;
+  border: none; border-bottom: 2px solid transparent; background: none; font-family: inherit; font-size: 13.5px; font-weight: 500;
+  color: var(--ink-soft); cursor: pointer; white-space: nowrap; transition: color 0.14s ease, border-color 0.14s ease;
+}
+.ui-tab:hover { color: var(--ink); }
+.ui-tab-on, .ui-tab-on:hover { color: var(--ui-accent); font-weight: 600; border-bottom-color: var(--ui-accent); }
+.ui-tab svg { width: 15px; height: 15px; }
+
+/* ── Seções, campos, grades ─────────────────────────────────────────────── */
+.ui-section { display: flex; flex-direction: column; gap: 20px; scroll-margin-top: 80px; }
+.ui-section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--ui-line); }
+.ui-section-title { margin: 0; font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ui-accent); }
+
+.ui-field { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ui-field-head { display: flex; align-items: center; gap: 10px; min-height: 22px; }
+.ui-label { font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-soft); opacity: 0.7; }
+.ui-field-hint { margin: 0 0 2px; font-size: 12px; color: var(--ink-soft); opacity: 0.75; }
+.ui-grid { display: grid; gap: 22px 36px; }
+.ui-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.ui-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 760px) { .ui-grid-2, .ui-grid-3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* campo editável: sem moldura até passar o mouse ou focar */
+.ui-input {
+  width: calc(100% + 8px); margin-left: -8px; padding: 5px 8px; font-family: inherit; font-size: 14px; line-height: 1.5; color: var(--ink);
+  background: transparent; border: 1px solid transparent; border-radius: 2px; transition: border-color 0.13s ease, background 0.13s ease;
+}
+.ui-input:hover { border-color: rgba(27, 23, 20, 0.16); background: rgba(27, 23, 20, 0.02); }
+.ui-input:focus { outline: none; border-color: var(--ui-accent); background: #fff; box-shadow: 0 0 0 3px rgba(252, 94, 14, 0.1); }
+.ui-input::placeholder { color: var(--ink-soft); opacity: 0.4; }
+textarea.ui-input { resize: none; overflow: hidden; }
+
+/* ── Etiquetas e estado ─────────────────────────────────────────────────── */
+.ui-tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 2px; font-size: 11.5px; font-weight: 600; line-height: 1.4; }
+.ui-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+.ui-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+.ui-tag.ui-tone-neutral { background: rgba(27, 23, 20, 0.07); color: var(--ink-soft); }
+.ui-tag.ui-tone-accent { background: rgba(252, 94, 14, 0.1); color: var(--ui-accent-dark); }
+.ui-tag.ui-tone-green { background: #e3f6e8; color: #166534; }
+.ui-tag.ui-tone-amber { background: #fff1d6; color: #8a5200; }
+.ui-tag.ui-tone-red { background: #fdecec; color: #b3261e; }
+.ui-tag.ui-tone-blue { background: #e8f0fe; color: #1d4ed8; }
+.ui-status.ui-tone-neutral { color: var(--ink-soft); }
+.ui-status.ui-tone-accent { color: var(--ui-accent-dark); }
+.ui-status.ui-tone-green { color: #15803d; }
+.ui-status.ui-tone-amber { color: #92400e; }
+.ui-status.ui-tone-red { color: #b3261e; }
+.ui-status.ui-tone-blue { color: #1d4ed8; }
+
+/* ── Aviso em nota de margem ────────────────────────────────────────────── */
+.ui-callout { border-left: 2px solid currentColor; padding: 2px 0 2px 16px; }
+.ui-callout.ui-tone-amber { color: #d97706; }
+.ui-callout.ui-tone-red { color: #dc2626; }
+.ui-callout.ui-tone-green { color: #16a34a; }
+.ui-callout.ui-tone-blue { color: #2563eb; }
+.ui-callout.ui-tone-neutral { color: var(--ink-soft); }
+.ui-callout.ui-tone-accent { color: var(--ui-accent); }
+.ui-callout-title { margin-bottom: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; }
+.ui-callout-body { color: var(--ink); }
+
+/* ── Menu suspenso ──────────────────────────────────────────────────────── */
+.ui-menu-wrap { position: relative; display: inline-flex; }
+.ui-menu-backdrop { position: fixed; inset: 0; z-index: 70; }
+.ui-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 71; min-width: 230px; padding: 4px;
+  background: #fff; border-radius: var(--ui-radius); box-shadow: 0 8px 24px -10px rgba(27, 23, 20, 0.35), 0 0 0 1px rgba(27, 23, 20, 0.1);
+}
+.ui-menu-left { right: auto; left: 0; }
+.ui-menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: none; border-radius: 2px; background: transparent;
+  font-family: inherit; font-size: 13.5px; color: var(--ink); text-align: left; cursor: pointer;
+}
+.ui-menu-item:hover { background: rgba(27, 23, 20, 0.06); }
+.ui-menu-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 20px; padding: 0 4px; border-radius: 2px; background: var(--ink); color: #fff; font-size: 10px; font-weight: 800; letter-spacing: 0.04em; }
+
+/* ── Carregando ─────────────────────────────────────────────────────────── */
+.ui-spinner { width: 15px; height: 15px; border: 2px solid rgba(27, 23, 20, 0.15); border-top-color: var(--ui-accent); border-radius: 50%; animation: ui-rot 0.7s linear infinite; }
+@keyframes ui-rot { to { transform: rotate(360deg); } }
+
+/* ── Avatar e cabeçalho de paciente ─────────────────────────────────────── */
+.ui-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; border-radius: 50%; font-weight: 700; letter-spacing: 0.02em; }
+.ui-avatar-sm { width: 28px; height: 28px; font-size: 11px; }
+.ui-avatar-md { width: 36px; height: 36px; font-size: 13px; }
+.ui-avatar-lg { width: 48px; height: 48px; font-size: 16px; }
+.ui-pheader { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.ui-pheader-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ui-pheader-name { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.25; color: var(--ink); }
+.ui-pheader-line { font-size: 12.5px; line-height: 1.4; color: var(--ink-soft); }
+.ui-pheader-badge { margin-top: 4px; }
+.ui-avatar-xl { width: 64px; height: 64px; font-size: 21px; }
+.ui-pheader-stack { flex-direction: column; text-align: center; gap: 10px; width: 100%; }
+.ui-pheader-stack .ui-pheader-text { align-items: center; }
+.ui-pheader-link { padding: 0; border: none; background: none; font: inherit; text-align: left; cursor: pointer; color: inherit; }
+.ui-pheader-stack.ui-pheader-link { text-align: center; }
+.ui-pheader-link:hover .ui-pheader-name { color: var(--ui-accent); text-decoration: underline; text-underline-offset: 3px; }
+.ui-pheader-compact { gap: 8px; width: auto; }
+.ui-pheader-compact .ui-pheader-name { font-size: 14px; font-weight: 600; }

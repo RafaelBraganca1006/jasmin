@@ -1,3 +1,4 @@
+import { searchOfficialTuss } from "@/lib/cobranca-knowledge/tuss-shortlist";
 import type {
   TussSearchResult,
   TussEntry,
@@ -257,6 +258,18 @@ function fallbackSearchTuss(query: string, topK: number): TussSearchResult[] {
     fonte: "lookup" as const,
     source: "tabela local",
   })).filter((r) => r.score > 0);
+  // Complementa com busca por palavras na tabela OFICIAL (370 códigos), com score
+  // limitado: o match por sinônimo (curado) continua tendo prioridade.
+  for (const o of searchOfficialTuss(query, topK)) {
+    if (scored.some((x) => x.codigo_tuss === o.codigo)) continue;
+    scored.push({
+      codigo_tuss: o.codigo,
+      descricao: o.descricao,
+      score: Math.min(0.75, o.score),
+      fonte: "lookup" as const,
+      source: "tabela TUSS oficial",
+    });
+  }
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, Math.max(0, topK));
 }

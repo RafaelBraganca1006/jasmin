@@ -1,4 +1,4 @@
-import { groq, MODELS } from "@/lib/groq";
+import { groq, MODELS, llmParams } from "@/lib/groq";
 import type { ProntuarioSOAP, SOAPFieldKey } from "@/lib/types";
 
 const SYSTEM_PROMPT = `Você é um assistente de documentação clínica odontológica para o SUS (Brasil).
@@ -85,6 +85,7 @@ function normalize(raw: Partial<ProntuarioSOAP>): ProntuarioSOAP {
 export async function structureTranscript(transcript: string): Promise<ProntuarioSOAP> {
   const completion = await groq.chat.completions.create({
     model: MODELS.structuring,
+      ...llmParams(),
     temperature: 0.2,
     response_format: { type: "json_object" },
     messages: [

@@ -1,7 +1,7 @@
 import type { TussEntry } from "@/lib/types-cobranca";
 
 /**
- * FALLBACK ONLY — usado quando o RAG server (scripts/rag_server.py) está
+ * FALLBACK ONLY — códigos conferidos contra a tabela oficial (lib/tuss-data.ts) — usado quando o RAG server (scripts/rag_server.py) está
  * indisponível. Em operação normal, searchTuss consulta o ChromaDB (embeddings
  * dos documentos reais da knowledge_base/). Esta tabela é o plano B: match por
  * sinônimos (string includes) sobre os procedimentos mais comuns.
@@ -14,8 +14,8 @@ import type { TussEntry } from "@/lib/types-cobranca";
 export const TUSS_LOOKUP: TussEntry[] = [
   // ── Endodontia ────────────────────────────────────────────────────────────
   {
-    codigo_tuss: "81000030",
-    descricao_oficial: "Tratamento endodôntico de dente permanente unirradicular",
+    codigo_tuss: "85200166",
+    descricao_oficial: "Tratamento endodôntico unirradicular",
     sinonimos: [
       "canal",
       "endodontia",
@@ -34,8 +34,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     ],
   },
   {
-    codigo_tuss: "81000049",
-    descricao_oficial: "Tratamento endodôntico de dente permanente birradicular",
+    codigo_tuss: "85200140",
+    descricao_oficial: "Tratamento endodôntico birradicular",
     sinonimos: [
       "canal birradicular",
       "canal pré-molar",
@@ -52,8 +52,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     ],
   },
   {
-    codigo_tuss: "81000057",
-    descricao_oficial: "Tratamento endodôntico de dente permanente multirradicular",
+    codigo_tuss: "85200158",
+    descricao_oficial: "Tratamento endodôntico multirradicular",
     sinonimos: [
       "canal multirradicular",
       "canal molar",
@@ -73,8 +73,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
 
   // ── Dentística / Restaurações ─────────────────────────────────────────────
   {
-    codigo_tuss: "82000240",
-    descricao_oficial: "Restauração em resina composta — uma face",
+    codigo_tuss: "85100196",
+    descricao_oficial: "Restauração em resina fotopolimerizável 1 face",
     sinonimos: [
       "restauração",
       "restauracao",
@@ -91,8 +91,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["raio-x interproximal ou periapical da região"],
   },
   {
-    codigo_tuss: "82000259",
-    descricao_oficial: "Restauração em resina composta — duas faces",
+    codigo_tuss: "85100200",
+    descricao_oficial: "Restauração em resina fotopolimerizável 2 faces",
     sinonimos: [
       "restauração duas faces",
       "restauracao duas faces",
@@ -108,8 +108,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
 
   // ── Cirurgia / Exodontia ──────────────────────────────────────────────────
   {
-    codigo_tuss: "81000120",
-    descricao_oficial: "Exodontia simples de dente permanente",
+    codigo_tuss: "82000875",
+    descricao_oficial: "Exodontia simples de permanente",
     sinonimos: [
       "extração",
       "extracao",
@@ -123,8 +123,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["raio-x periapical pré-operatório"],
   },
   {
-    codigo_tuss: "81000138",
-    descricao_oficial: "Exodontia de dente incluso / impactado",
+    codigo_tuss: "82001286",
+    descricao_oficial: "Remoção de dentes inclusos / impactados",
     sinonimos: [
       "extração siso",
       "extracao siso",
@@ -143,8 +143,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
 
   // ── Periodontia ───────────────────────────────────────────────────────────
   {
-    codigo_tuss: "83000030",
-    descricao_oficial: "Raspagem supra e subgengival por sextante",
+    codigo_tuss: "85300047",
+    descricao_oficial: "Raspagem supra-gengival",
     sinonimos: [
       "raspagem",
       "limpeza profunda",
@@ -160,8 +160,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     ],
   },
   {
-    codigo_tuss: "84000030",
-    descricao_oficial: "Profilaxia / polimento coronário",
+    codigo_tuss: "84000198",
+    descricao_oficial: "Profilaxia: polimento coronário",
     sinonimos: [
       "limpeza",
       "profilaxia",
@@ -178,7 +178,7 @@ export const TUSS_LOOKUP: TussEntry[] = [
 
   // ── Consulta e diagnóstico ────────────────────────────────────────────────
   {
-    codigo_tuss: "81000014",
+    codigo_tuss: "81000065",
     descricao_oficial: "Consulta odontológica inicial",
     sinonimos: [
       "consulta",
@@ -193,7 +193,7 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: [],
   },
   {
-    codigo_tuss: "81000080",
+    codigo_tuss: "81000421",
     descricao_oficial: "Radiografia periapical",
     sinonimos: [
       "raio-x",
@@ -208,8 +208,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: [],
   },
   {
-    codigo_tuss: "81000098",
-    descricao_oficial: "Radiografia panorâmica",
+    codigo_tuss: "81000405",
+    descricao_oficial: "Radiografia panorâmica de mandíbula/maxila (ortopantomografia)",
     sinonimos: [
       "panorâmica",
       "panoramica",
@@ -224,8 +224,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
 
   // ── Procedimentos comuns inferidos (clínica geral) ────────────────────────
   {
-    codigo_tuss: "82000267",
-    descricao_oficial: "Restauração em resina composta — três ou mais faces",
+    codigo_tuss: "85100218",
+    descricao_oficial: "Restauração em resina fotopolimerizável 3 faces",
     sinonimos: [
       "restauração três faces",
       "restauracao tres faces",
@@ -238,8 +238,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["raio-x periapical da região"],
   },
   {
-    codigo_tuss: "85100072",
-    descricao_oficial: "Faceta direta em resina composta",
+    codigo_tuss: "85100064",
+    descricao_oficial: "Faceta direta em resina fotopolimerizável",
     sinonimos: [
       "faceta",
       "faceta de resina",
@@ -251,8 +251,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["foto clínica inicial", "raio-x da região"],
   },
   {
-    codigo_tuss: "87000114",
-    descricao_oficial: "Núcleo de preenchimento / pino intrarradicular",
+    codigo_tuss: "85400211",
+    descricao_oficial: "Núcleo de preenchimento",
     sinonimos: [
       "núcleo",
       "nucleo",
@@ -266,8 +266,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["raio-x periapical pós-endodontia"],
   },
   {
-    codigo_tuss: "87000300",
-    descricao_oficial: "Coroa total / unitária",
+    codigo_tuss: "85400157",
+    descricao_oficial: "Coroa total metalo cerâmica",
     sinonimos: [
       "coroa",
       "coroa total",
@@ -283,8 +283,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     ],
   },
   {
-    codigo_tuss: "81000065",
-    descricao_oficial: "Pulpotomia / capeamento pulpar",
+    codigo_tuss: "85200042",
+    descricao_oficial: "Pulpotomia",
     sinonimos: [
       "pulpotomia",
       "capeamento pulpar",
@@ -296,23 +296,28 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["raio-x periapical inicial"],
   },
   {
-    codigo_tuss: "84000048",
-    descricao_oficial: "Aplicação tópica de flúor / selante de fóssulas e fissuras",
+    codigo_tuss: "84000090",
+    descricao_oficial: "Aplicação tópica de flúor",
     sinonimos: [
       "flúor",
       "fluor",
       "aplicação de flúor",
-      "selante",
-      "selante de fóssulas",
-      "selante de fissura",
     ],
     categoria: "Prevenção",
     requer_autorizacao: false,
     documentacao_obrigatoria: [],
   },
   {
-    codigo_tuss: "85200116",
-    descricao_oficial: "Clareamento dental de consultório (por arcada)",
+    codigo_tuss: "84000074",
+    descricao_oficial: "Aplicação de selante de fóssulas e fissuras",
+    sinonimos: ["selante", "selante de fóssulas", "selante de fissura"],
+    categoria: "Prevenção",
+    requer_autorizacao: false,
+    documentacao_obrigatoria: [],
+  },
+  {
+    codigo_tuss: "85100030",
+    descricao_oficial: "Clareamento dentário de consultório",
     sinonimos: [
       "clareamento",
       "clareamento dental",
@@ -324,8 +329,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["foto clínica inicial"],
   },
   {
-    codigo_tuss: "83000111",
-    descricao_oficial: "Gengivectomia / gengivoplastia por sextante",
+    codigo_tuss: "82000921",
+    descricao_oficial: "Gengivectomia",
     sinonimos: [
       "gengivectomia",
       "gengivoplastia",
@@ -340,8 +345,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     ],
   },
   {
-    codigo_tuss: "81000260",
-    descricao_oficial: "Drenagem de abscesso intra ou extraoral",
+    codigo_tuss: "82001030",
+    descricao_oficial: "Incisão e Drenagem intra-oral de abscesso, hematoma e/ou flegmão da região buco-maxilo-facial",
     sinonimos: [
       "drenagem",
       "drenagem de abscesso",
@@ -354,7 +359,7 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: ["raio-x periapical da região"],
   },
   {
-    codigo_tuss: "81000287",
+    codigo_tuss: "82001650",
     descricao_oficial: "Tratamento de alveolite",
     sinonimos: [
       "alveolite",
@@ -368,8 +373,8 @@ export const TUSS_LOOKUP: TussEntry[] = [
     documentacao_obrigatoria: [],
   },
   {
-    codigo_tuss: "81000110",
-    descricao_oficial: "Restauração provisória / curativo de demora",
+    codigo_tuss: "85100056",
+    descricao_oficial: "Curativo de demora em endodontia",
     sinonimos: [
       "curativo",
       "curativo de demora",

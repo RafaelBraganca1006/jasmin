@@ -1,12 +1,15 @@
-// Testa a consolidação clínica → faturável do Passo 4 e a geração da guia.
+// Testa o pipeline em duas etapas separadas:
+//   (a) o prontuário (Passo 4) documenta SÓ o clínico — sem tabela TUSS no prompt;
+//   (b) o agente de cobrança consolida clínico → faturável (Nó 2a) ao gerar a guia.
 //
 // Fluxo:
 //   1. POST /api/prontuario com a transcrição de um canal no dente 36.
-//   2. Valida plano.procedimentos_faturaveis (canal multirradicular + raio-x;
-//      curativo de demora quando sessão não concluída; sem etapas técnicas
-//      vazando como itens faturáveis separados).
-//   3. Monta um storageSnapshot mínimo e POST /api/cobranca (SSE) e verifica que
-//      os faturáveis viram itens da guia sem alertas críticos.
+//   2. Valida que plano.procedimentos_realizados foi preenchido e que
+//      procedimentos_faturaveis veio vazio (a consolidação não é mais do prontuário).
+//   3. Monta um storageSnapshot mínimo e POST /api/cobranca (SSE); valida na GUIA
+//      (canal multirradicular + raio-x; curativo de demora quando sessão não
+//      concluída; sem etapas técnicas como itens; sem anestesia) e ausência de
+//      alertas críticos.
 //
 // Uso: npm run test:consolidacao   (com o dev server rodando)
 // RAG é OPCIONAL — o agente de cobrança degrada graciosamente sem o rag_server.
@@ -70,10 +73,14 @@ const realizados = prontuario?.plano?.procedimentos_realizados ?? [];
 
 console.log("=== Procedimentos realizados (documentação clínica) ===");
 console.log(realizados.length ? realizados : "(vazio)");
-console.log("\n=== Procedimentos faturáveis (consolidados) ===");
-console.log(JSON.stringify(fat, null, 2));
-console.log("\n=== Validações ===");
+console.log("\n=== Validações do prontuário ===");
+if (realizados.length) ok(`${realizados.length} procedimento(s) clínico(s) documentado(s)`);
+else fail("procedimentos_realizados veio vazio");
+if (!fat.length) ok("procedimentos_faturaveis vazio (consolidação fica com o agente de cobrança)");
+else warn("procedimentos_faturaveis veio preenchido — não deveria mais");
 
+/** Valida a consolidação sobre os procedimentos da GUIA. */
+const validarConsolidacao = (fat) => {
 // Canal multirradicular faturável.
 const canal = fat.find(
   (f) => norm(f.descricao).includes("endodontic") || norm(f.descricao).includes("endodontico") || norm(f.descricao).includes("canal")
@@ -85,7 +92,7 @@ if (canal) {
   else warn(`Canal não veio como multirradicular (veio: ${canal.descricao})`);
   if (norm(canal.elemento_dental).includes("36")) ok("Dente do canal = 36");
   else warn(`Dente do canal inesperado: "${canal.elemento_dental}"`);
-  if (canal.inclui_etapas.length >= 2) ok(`Canal consolida ${canal.inclui_etapas.length} etapas técnicas`);
+  if ((canal.inclui_etapas ?? []).length >= 2) ok(`Canal consolida ${canal.inclui_etapas.length} etapas técnicas`);
   else warn("Canal não listou as etapas técnicas consolidadas (inclui_etapas)");
 } else {
   fail("Nenhum procedimento de canal/endodontia faturável foi identificado");
@@ -111,6 +118,8 @@ else fail(`Etapas técnicas viraram itens faturáveis: ${vazadas.map((v) => v.de
 if (!fat.some((f) => norm(f.descricao).includes("anestesi")))
   ok("Anestesia não foi cobrada separadamente");
 else fail("Anestesia apareceu como item faturável (não deveria)");
+
+};
 
 // ── 2. Gera a guia de cobrança e checa o score ──────────────────────────────
 console.log(`\n→ POST ${BASE}/api/cobranca\n`);
@@ -166,9 +175,8 @@ if (cobErro || !guia) {
   console.log("=== Guia: alertas de glosa ===");
   for (const a of guia.alertas_glosa) console.log(`  [${a.tipo}] (${a.campo}) ${a.mensagem}`);
 
-  const consolidados = guia.procedimentos.filter((p) => p.fonte === "prontuario").length;
-  if (consolidados > 0) ok(`${consolidados} procedimento(s) com fonte "prontuario" (sem RAG)`);
-  else warn('Nenhum procedimento veio com fonte "prontuario"');
+  console.log("\n=== Validações da consolidação (na guia) ===");
+  validarConsolidacao(guia.procedimentos);
 
   // Sem score: a saúde da consolidação se mede pela ausência de alertas críticos.
   const criticos = guia.alertas_glosa.filter((a) => a.tipo === "critico");

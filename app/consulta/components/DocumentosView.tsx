@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "@/app/components/ui";
 import { useState, useRef, useCallback, useEffect } from "react";
 
 interface DocumentItem {
@@ -162,12 +163,12 @@ export default function DocumentosView() {
           />
         </div>
         <div className="p-toolbar-right">
-          <button className="btn btn-solid btn-sm" onClick={() => fileInputRef.current?.click()}>
+          <Button variant="primary" size="sm" onClick={() => fileInputRef.current?.click()}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             Adicionar documento
-          </button>
+          </Button>
           <input
             ref={fileInputRef}
             type="file"
@@ -284,8 +285,8 @@ export default function DocumentosView() {
               O arquivo <strong>{docs.find((d) => d.id === deleteId)?.name}</strong> será removido permanentemente.
             </p>
             <div className="p-confirm-actions">
-              <button className="btn btn-outline btn-sm" onClick={() => setDeleteId(null)}>Cancelar</button>
-              <button className="btn btn-danger btn-sm" onClick={handleDeleteConfirm}>Excluir</button>
+              <Button variant="secondary" size="sm" onClick={() => setDeleteId(null)}>Cancelar</Button>
+              <Button variant="danger" size="sm" onClick={handleDeleteConfirm}>Excluir</Button>
             </div>
           </div>
         </div>

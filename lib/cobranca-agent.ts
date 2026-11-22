@@ -1,7 +1,8 @@
-import { groq, MODELS } from "@/lib/groq";
+import { groq, MODELS, llmParams } from "@/lib/groq";
 import type { ProntuarioModel, ProcedimentoFaturavel } from "@/lib/types-prontuario";
 import { procedimentosRealizados } from "@/lib/types-prontuario";
-import { getOfficialTuss } from "@/lib/tuss-context";
+import { getOfficialTuss, isKnownTussCode } from "@/lib/tuss-context";
+import { buildTussShortlist, formatShortlist } from "@/lib/cobranca-knowledge/tuss-shortlist";
 import type {
   GuiaSPSADT,
   ProcedimentoGuia,
@@ -19,7 +20,7 @@ import {
 } from "@/lib/cobranca-knowledge/rag-retriever";
 
 /**
- * Agente de Cobrança (Camada 5) — pipeline de 4 nós sequenciais.
+ * Agente de Cobrança (Camada 5) — pipeline sequencial (Parser · Consolidador TUSS · TUSS Mapper · Rules Checker · Builder).
  *
  * Orquestração em TypeScript puro (sem LangGraph): os nós correm em sequência,
  * cada um isolado em try/catch. Falhas NUNCA interrompem o pipeline: o nó que
@@ -136,6 +137,7 @@ async function runParser(
   try {
     const completion = await groq.chat.completions.create({
       model: MODELS.structuring,
+      ...llmParams(),
       temperature: 0.1,
       response_format: { type: "json_object" },
       messages: [
@@ -200,6 +202,22 @@ async function runParser(
 // NÓ 2 — TUSS Mapper (RAG searchTuss + LLM escolhe o melhor candidato)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Rede de segurança determinística (usada quando o consolidador LLM não rodou):
+ * corrige o código do tratamento endodôntico pelo número de raízes do dente.
+ * 85200166 unirradicular · 85200140 birradicular · 85200158 multirradicular.
+ */
+function ajustaEndoPorRaizes(codigo: string, dente: string): string {
+  if (!["85200166", "85200140", "85200158"].includes(codigo)) return codigo;
+  const n = parseInt(dente, 10);
+  if (!Number.isFinite(n)) return codigo;
+  const pos = n % 10;
+  if (pos >= 6) return "85200158"; // molares
+  if (pos === 4 || pos === 5) return "85200140"; // pré-molares
+  if (pos >= 1 && pos <= 3) return "85200166"; // anteriores
+  return codigo;
+}
+
 const SCORE_MIN_ACEITAVEL = 0.4;
 // Abaixo disto, mesmo com mapeamento, avisamos para revisar (baixa confiança).
 const SCORE_BAIXA_CONFIANCA = 0.6;
@@ -263,6 +281,7 @@ async function runTussMapper(
 
       const completion = await groq.chat.completions.create({
         model: MODELS.structuring,
+      ...llmParams(),
         temperature: 0,
         response_format: { type: "json_object" },
         messages: [
@@ -321,13 +340,15 @@ async function runTussMapper(
       };
     }
 
-    const entry = getTussEntry(escolhido.codigo_tuss);
-    const descricao = entry?.descricao_oficial ?? escolhido.descricao;
+    const codigoFinal = ajustaEndoPorRaizes(escolhido.codigo_tuss, elementoDental);
+    const entry = getTussEntry(codigoFinal);
+    const oficial = getOfficialTuss(codigoFinal);
+    const descricao = entry?.descricao_oficial ?? oficial?.descricao ?? escolhido.descricao;
     const fonte: FonteProcedimento = escolhido.fonte === "rag" ? "rag" : "lookup";
 
     emit({
       tipo: "result",
-      mensagem: `Encontrado em ${escolhido.source ?? "tabela"}: ${escolhido.codigo_tuss} — ${descricao}`,
+      mensagem: `Encontrado em ${escolhido.source ?? "tabela"}: ${codigoFinal} — ${descricao}`,
       detalhes: { score: escolhido.score, source: escolhido.source, fonte },
     });
     if (escolhido.score < SCORE_BAIXA_CONFIANCA) {
@@ -339,7 +360,7 @@ async function runTussMapper(
     }
 
     return {
-      codigo_tuss: escolhido.codigo_tuss,
+      codigo_tuss: codigoFinal,
       descricao,
       quantidade: 1,
       elemento_dental: elementoDental,
@@ -446,6 +467,122 @@ async function mapFaturaveis(
   }
 
   return { procedimentos: out, alertas };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// NÓ 2a — Consolidador TUSS (LLM, só para prontuários SEM faturáveis)
+//
+// Antes esta consolidação (etapas clínicas → procedimentos faturáveis) rodava no
+// Passo 4 do prontuário, com a tabela TUSS inteira (~8k tokens) no prompt. Agora
+// roda aqui, ao gerar a guia, com uma LISTA CURTA de candidatos (~1,5k tokens)
+// montada localmente a partir da tabela oficial + sugestões do RAG.
+// ─────────────────────────────────────────────────────────────────
+
+const SYS_CONSOLIDADOR = `Você é especialista em faturamento odontológico brasileiro, com profundo conhecimento da tabela TUSS e das regras de cobrança de convênios.
+Recebe as ETAPAS CLÍNICAS realizadas numa consulta (procedimentos_realizados), o contexto clínico e uma LISTA DE CANDIDATOS TUSS (codigo | descricao).
+Sua tarefa: consolidar as etapas nos procedimentos FATURÁVEIS ao convênio, escolhendo os códigos EXCLUSIVAMENTE da lista de candidatos.
+
+REGRAS DE CONSOLIDAÇÃO — leia com atenção:
+1. Etapas técnicas de um procedimento NÃO são cobradas separadamente. Abertura coronária, localização de canais, preparo químico-mecânico e instrumentação são etapas do tratamento endodôntico — não itens separados.
+2. Para endodontia, escolha o código por número de raízes do dente:
+   - Anteriores (11-13, 21-23, 31-33, 41-43): unirradicular.
+   - Pré-molares (14, 15, 24, 25, 34, 35, 44, 45): birradicular.
+   - Molares (16, 17, 18, 26, 27, 28, 36, 37, 38, 46, 47, 48): multirradicular.
+3. Curativo de demora é faturável SEPARADO do canal APENAS quando a obturação não foi concluída na mesma sessão. Se a sessão concluiu o canal, cobre o canal completo; se foi só curativo, cobre o curativo.
+4. Radiografia periapical É faturável separadamente quando realizada (quantidade 2 se houve radiografia inicial e final).
+5. Anestesia NÃO é faturável separadamente — está inclusa no procedimento principal.
+6. Restaurações: escolha pelo número de faces do dente restaurado e pelo material.
+7. Se nenhum candidato representa o procedimento com confiança, use codigo_tuss: "MANUAL" e requer_revisao: true. NUNCA invente código nem use código fora da lista.
+8. Para cada item, liste em inclui_etapas quais etapas de procedimentos_realizados foram consolidadas nele.
+
+Cada item é um objeto:
+{ "codigo_tuss": "<código da lista ou MANUAL>", "descricao": "<descrição da lista>", "elemento_dental": "<FDI ou ''>", "quantidade": <number>, "inclui_etapas": ["<etapa>"], "requer_revisao": <boolean>, "justificativa": "<por que esse código>" }
+
+Responda SOMENTE com JSON válido: { "procedimentos_faturaveis": [ ... ] }`;
+
+async function runConsolidador(
+  model: ProntuarioModel,
+  elementoDental: string,
+  emit: EmitTrace
+): Promise<{ faturaveis: ProcedimentoFaturavel[]; alertas: AlertaGlosa[] }> {
+  const etapas = procedimentosRealizados(model.plano);
+  emit({ tipo: "decision", mensagem: "Consolidando as etapas clínicas em procedimentos faturáveis..." });
+
+  // Sugestões do RAG (ou da busca local, se o RAG estiver fora) — entram na lista curta.
+  const extraCodes: string[] = [];
+  for (const etapa of etapas.slice(0, 12)) {
+    emit({ tipo: "search", mensagem: `Buscando candidatos TUSS para: ${etapa}`, detalhes: { query: etapa, collection: "tuss_procedures" } });
+    try {
+      for (const c of await searchTuss(etapa, 3)) if (c.codigo_tuss) extraCodes.push(c.codigo_tuss);
+    } catch {
+      /* segue só com a busca local */
+    }
+  }
+
+  const contexto = [
+    model.diagnostico?.cid_descricao,
+    model.exame?.laudo_radiologico,
+    model.plano?.materiais,
+    model.plano?.proxima_consulta,
+  ]
+    .filter(Boolean)
+    .join(" ; ");
+  const lista = buildTussShortlist({ procedimentos: etapas, contexto, extraCodes });
+  emit({ tipo: "result", mensagem: `${lista.length} códigos TUSS candidatos selecionados da tabela oficial.` });
+
+  const user = `ETAPAS CLÍNICAS (procedimentos_realizados):
+${etapas.map((e) => `- ${e}`).join("\n")}
+
+CONTEXTO:
+- Dente principal (FDI): ${elementoDental || "—"}
+- Diagnóstico: ${model.diagnostico?.cid_codigo || "—"} ${model.diagnostico?.cid_descricao || ""}
+- Laudo radiológico: ${model.exame?.laudo_radiologico || "—"}
+- Materiais: ${model.plano?.materiais || "—"}
+- Próxima consulta / continuidade: ${model.plano?.proxima_consulta || "—"}
+
+CANDIDATOS TUSS (codigo | descricao):
+${formatShortlist(lista)}`;
+
+  const completion = await groq.chat.completions.create({
+    model: MODELS.structuring,
+      ...llmParams(),
+    temperature: 0,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: SYS_CONSOLIDADOR },
+      { role: "user", content: user },
+    ],
+  });
+  const raw = JSON.parse(completion.choices[0]?.message?.content ?? "{}") as { procedimentos_faturaveis?: unknown };
+
+  const faturaveis: ProcedimentoFaturavel[] = [];
+  for (const item of Array.isArray(raw.procedimentos_faturaveis) ? raw.procedimentos_faturaveis : []) {
+    if (!item || typeof item !== "object") continue;
+    const o = item as Record<string, unknown>;
+    const codigo = str(o.codigo_tuss).toUpperCase();
+    const descricao = str(o.descricao);
+    if (!codigo && !descricao) continue;
+    const manual = codigo === "MANUAL" || !codigo;
+    // Defensivo: código fora da tabela oficial = alucinação → força revisão humana.
+    const conhecido = !manual && isKnownTussCode(codigo);
+    const q = Number(o.quantidade);
+    faturaveis.push({
+      codigo_tuss: conhecido ? codigo : "MANUAL",
+      descricao: conhecido ? getOfficialTuss(codigo)!.descricao : descricao,
+      elemento_dental: str(o.elemento_dental),
+      quantidade: Number.isFinite(q) && q > 0 ? q : 1,
+      inclui_etapas: arr(o.inclui_etapas),
+      requer_revisao: bool(o.requer_revisao) || !conhecido,
+      justificativa: str(o.justificativa),
+    });
+  }
+  emit({
+    tipo: "decision",
+    mensagem: faturaveis.length
+      ? `Procedimentos faturáveis: ${faturaveis.map((f) => f.descricao).join("; ")}`
+      : "Nenhum procedimento faturável identificado.",
+  });
+  return { faturaveis, alertas: [] };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -590,9 +727,12 @@ function inferTipoAtendimento(
   procedimentos: ProcedimentoGuia[]
 ): GuiaSPSADT["tipo_atendimento"] {
   const codigos = procedimentos.map((p) => p.codigo_tuss);
-  const urgencia = ["81000260", "81000287", "81000138"];
+  // Códigos conferidos na tabela TUSS oficial: consulta de urgência (81000049),
+  // urgência 24h (81000057) e curativo endodôntico de urgência (85200174).
+  const urgencia = ["81000049", "81000057", "85200174"];
   if (codigos.some((c) => urgencia.includes(c))) return "urgencia";
-  if (procedimentos.length === 1 && procedimentos[0].codigo_tuss === "81000014")
+  // Consulta odontológica (81000030) / inicial (81000065) como único item.
+  if (procedimentos.length === 1 && ["81000030", "81000065"].includes(procedimentos[0].codigo_tuss))
     return "consulta";
   return "procedimento";
 }
@@ -638,8 +778,29 @@ export async function gerarGuiaCobranca(
   // (fonte "prontuario"); senão, mapeia via RAG a partir da linguagem natural.
   let procedimentos: ProcedimentoGuia[] = [];
   try {
-    const r = parser.faturaveis.length
-      ? await mapFaturaveis(parser.faturaveis, parser.elemento_dental, emit)
+    // Prontuários novos chegam SEM faturáveis: consolida agora (Nó 2a). Se o LLM
+    // falhar (ex.: limite de requisições), cai no mapeamento por busca (Nó 2).
+    let faturaveis = parser.faturaveis;
+    if (!faturaveis.length && parser.procedimentos_realizados.length) {
+      try {
+        const c = await runConsolidador(prontuarioModel, parser.elemento_dental, emit);
+        faturaveis = c.faturaveis;
+        alertas.push(...c.alertas);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "erro desconhecido";
+        emit({ tipo: "warning", mensagem: "Consolidação automática indisponível; mapeando cada etapa por busca." });
+        alertas.push(
+          alerta(
+            "atencao",
+            "procedimentos",
+            `Não foi possível consolidar os procedimentos automaticamente (${msg}). Cada etapa foi mapeada separadamente.`,
+            "Revise os códigos TUSS: etapas técnicas não devem ser cobradas separadamente."
+          )
+        );
+      }
+    }
+    const r = faturaveis.length
+      ? await mapFaturaveis(faturaveis, parser.elemento_dental, emit)
       : await runTussMapper(parser.procedimentos_realizados, parser.elemento_dental, emit);
     procedimentos = r.procedimentos;
     alertas.push(...r.alertas);
