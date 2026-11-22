@@ -217,6 +217,8 @@ export default function ConsultaPage() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const allChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Muda a cada gravação iniciada/cancelada: respostas de chunks de uma gravação descartada são ignoradas.
+  const recGenRef = useRef(0);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
   const avatarDropdownRef = useRef<HTMLDivElement>(null);
@@ -291,13 +293,16 @@ export default function ConsultaPage() {
       return;
     }
     const ext = data.type.includes("ogg") ? "ogg" : "webm";
+    const gen = recGenRef.current;
     try {
       const form = new FormData();
       form.append("audio", new File([data], `chunk-${index}.${ext}`, { type: data.type }));
       const res = await fetch("/api/transcribe", { method: "POST", body: form });
       const json = (await res.json()) as { transcript?: string; error?: string };
+      if (gen !== recGenRef.current) return;
       transcriptPartsRef.current[index] = json.transcript?.trim() ?? "";
     } catch {
+      if (gen !== recGenRef.current) return;
       transcriptPartsRef.current[index] = "";
     }
     const joined = transcriptPartsRef.current
@@ -383,6 +388,7 @@ export default function ConsultaPage() {
   }, [runProntuario]);
 
   const startRecording = useCallback(async () => {
+    recGenRef.current++;
     setError("");
     setLiveTranscript("");
     setChunksDone(0);
@@ -486,6 +492,33 @@ export default function ConsultaPage() {
     stopTimer();
     mediaRecorderRef.current?.stop();
   }, []);
+
+  // Interrompe a gravação e descarta tudo: não transcreve o final nem gera prontuário.
+  const cancelRecording = useCallback(() => {
+    recGenRef.current++;
+    stopTimer();
+    if (chunkFlushTimerRef.current) clearInterval(chunkFlushTimerRef.current);
+    chunkFlushTimerRef.current = null;
+    const mr = mediaRecorderRef.current;
+    mediaRecorderRef.current = null;
+    if (mr) {
+      mr.ondataavailable = null;
+      mr.onstop = () => mr.stream.getTracks().forEach((t) => t.stop());
+      if (mr.state !== "inactive") mr.stop();
+      else mr.stream.getTracks().forEach((t) => t.stop());
+    }
+    stopMeter();
+    transcriptPartsRef.current = [];
+    pendingRef.current = [];
+    allChunksRef.current = [];
+    pendingChunksRef.current = [];
+    headerChunkRef.current = null;
+    setLiveTranscript("");
+    setChunksDone(0);
+    setElapsed(0);
+    setError("");
+    setStatus(prontuario ? "done" : "idle");
+  }, [prontuario]);
 
   const processFile = useCallback(async (file: Blob, filename: string) => {
     setStatus("transcribing");
@@ -1027,7 +1060,7 @@ export default function ConsultaPage() {
 
               <section className="c-result">
                 {status === "recording" ? (
-                  <ConsultaRecording time={mmss} level={level} text={liveTranscript} onStop={stopRecording} />
+                  <ConsultaRecording time={mmss} level={level} text={liveTranscript} onStop={stopRecording} onCancel={cancelRecording} />
                 ) : status === "transcribing" || status === "processing" ? (
                   <ConsultaWorking label={status === "transcribing" ? "Finalizando a transcrição…" : "Estruturando o prontuário…"} steps={status === "processing"} />
                 ) : prontuario ? (

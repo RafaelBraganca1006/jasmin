@@ -11,8 +11,8 @@ import { Button, SectionTitle } from "@/app/components/ui";
 
 /** Gravando: tempo, nível do microfone, texto que vai surgindo e o botão de finalizar. */
 export function ConsultaRecording({
-  time, level, text, onStop,
-}: { time: string; level: number; text: string; onStop: () => void }) {
+  time, level, text, onStop, onCancel,
+}: { time: string; level: number; text: string; onStop: () => void; onCancel: () => void }) {
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     boxRef.current?.scrollTo({ top: boxRef.current.scrollHeight, behavior: "smooth" });
@@ -25,6 +25,7 @@ export function ConsultaRecording({
         <span className="cs-bar-label">Gravando</span>
         <span className="cs-timer">{time}</span>
         <div className="cs-meter" aria-hidden><i style={{ width: `${Math.max(4, level)}%` }} /></div>
+        <Button variant="secondary" onClick={onCancel}>Cancelar</Button>
         <Button variant="danger" onClick={onStop}>Finalizar consulta</Button>
       </div>
 
@@ -32,7 +33,7 @@ export function ConsultaRecording({
       <div className="cs-live" ref={boxRef}>
         {text ? text : <span className="cs-placeholder">O texto aparece aqui enquanto você atende, a cada poucos segundos.</span>}
       </div>
-      <p className="cs-hint">Ao finalizar, o prontuário é gerado automaticamente a partir da transcrição.</p>
+      <p className="cs-hint">Ao finalizar, o prontuário é gerado automaticamente a partir da transcrição. Cancelar descarta a gravação.</p>
     </div>
   );
 }
