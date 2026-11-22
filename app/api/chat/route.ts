@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { HumanMessage, AIMessage } from "@langchain/core/messages";
 import { createJasminGraph, buildSystemPrompt } from "@/lib/jasmin-graph";
-import { groq, MODELS, llmParams } from "@/lib/groq";
+import { groq, MODELS, llmParams, hasLlmFallback } from "@/lib/groq";
 import type { StorageSnapshot } from "@/lib/chat-snapshot";
 import type { ChatMessage, JasminChip } from "@/lib/chat-context";
 
@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
         }
       } catch (err) {
         console.error("[/api/chat] graph error:", err);
-        if (isRateLimit(err)) {
+        if (isRateLimit(err) && !hasLlmFallback()) {
           rateLimited = true;
           send("[[RESET]]");
           send("Limite de requisições do Groq atingido. Aguarde alguns segundos e tente novamente.");
